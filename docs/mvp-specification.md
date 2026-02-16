@@ -821,6 +821,7 @@ obs-tasks install-service
 - VPN detection and automatic retry
 - Retry logic with exponential backoff
 - Web dashboard for monitoring
+- **Manual/semi-automated task workflows** (see below)
 
 ### Priority 3 (Later):
 - Task dependencies (DAG execution)
@@ -833,6 +834,52 @@ obs-tasks install-service
 - Cloud sync support
 - Multi-vault support
 - Task templates and wizards
+
+### Manual & Semi-Automated Workflows (Post-MVP Concept)
+
+Extend the platform beyond automated shell commands to support **manual and semi-automated repeatable processes**. Same Markdown-based definition, same reporting, but the "executor" is a human following step-by-step instructions.
+
+**Use cases:**
+- Purchase Order creation (triggered on demand, guided step-by-step, human fills forms)
+- Monthly compliance checklist (scheduled reminder, human completes and confirms)
+- Semi-automated deploy (script runs pre-checks, human approves, script continues)
+
+**Proposed task format:**
+```markdown
+### Create Purchase Order
+
+#### Task Definition
+- Type: manual
+- Trigger: on-demand
+
+#### Steps
+1. Open SAP → navigate to ME21N
+2. Fill header: vendor, company code 1000
+3. Add line items from the attached request
+4. Get approval from cost center owner
+5. Submit PO and record PO number
+
+#### Current State
+- Status: ✅ Completed
+- Started: 2025-02-16 09:15:00
+- Completed: 2025-02-16 09:42:00
+- Duration: 27min
+- Result: PO #4500012345 created
+```
+
+**Key differences from automated tasks:**
+- `Type: manual` or `semi-auto` instead of implicit `auto`
+- `Trigger: on-demand` instead of cron schedule (scheduled reminders also possible)
+- `Steps` section with checkable items (human marks each done)
+- Duration measured from first step start to last step completion
+- Result entered by human (or captured from final automated step)
+
+**Implementation considerations:**
+- Requires interactive UI — likely an Obsidian plugin or CLI interactive mode
+- Parser needs to handle `Type` and `Steps` fields
+- Writer needs to track per-step completion timestamps
+- Same report generation and statistics tracking as automated tasks
+- Fits the "single source of truth in Markdown" philosophy perfectly
 
 ---
 
