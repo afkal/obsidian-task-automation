@@ -1,0 +1,395 @@
+"""Markdown writer — updates task state/statistics and creates report files.
+
+Design rules:
+- Never modify user content (Command, Schedule, notes).
+- Only touch ``#### Current State`` and ``#### Statistics`` sections.
+- Atomic file writes: write to temp file then rename.
+- Create report files with full output, metadata and Obsidian backlinks.
+"""
+
+from __future__ import annotations
+
+import logging
+import os
+import re
+import tempfile
+from datetime import datetime
+from pathlib import Path
+
+from obs_tasks.models import ExecutionResult, Task, TaskStatus, slugify
+
+logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# Formatting helpers
+# ---------------------------------------------------------------------------
+
+_STATUS_EMOJI = {
+    TaskStatus.SUCCESS: "✅ Success",
+    TaskStatus.FAILED: "❌ Failed",
+    TaskStatus.RUNNING: "🔄 Running",
+    TaskStatus.NEVER_RUN: "Never run",
+}
+
+
+def _format_status(status: TaskStatus) -> str:
+    return _STATUS_EMOJI.get(status, status.value)
+
+
+def _format_datetime(dt: datetime | None) -> str:
+    if dt is None:
+        return "-"
+    return dt.strftime("%Y-%m-%d %H:%M:%S")
+
+
+def _format_duration(seconds: float | None) -> str:
+    if seconds is None:
+        return "-"
+    return f"{seconds:.1f}s"
+
+
+def _format_result(summary: str | None) -> str:
+    if not summary:
+        return "-"
+    # Keep it single-line for the inline field.
+    return summary.replace("\n", " ").strip()[:200]
+
+
+# ---------------------------------------------------------------------------
+# Section builders
+# ---------------------------------------------------------------------------
+
+
+def build_current_state_lines(
+    status: TaskStatus,
+    last_run: datetime | None,
+    next_run: datetime | None,
+    duration: float | None,
+    result_summary: str | None,
+) -> list[str]:
+    """Build the lines for a ``#### Current State`` section."""
+    return [
+        "#### Current State",
+        f"- Status: {_format_status(status)}",
+        f"- Last Run: {_format_datetime(last_run)}",
+        f"- Next Run: {_format_datetime(next_run)}",
+        f"- Duration: {_format_duration(duration)}",
+        f"- Result: {_format_result(result_summary)}",
+    ]
+
+
+def build_statistics_lines(
+    total_runs: int,
+    successful_runs: int,
+    failed_runs: int,
+    last_failure: datetime | None,
+) -> list[str]:
+    """Build the lines for a ``#### Statistics`` section."""
+    return [
+        "#### Statistics",
+        f"- Total Runs: {total_runs}",
+        f"- Successful: {successful_runs}",
+        f"- Failed: {failed_runs}",
+        f"- Last Failure: {_format_datetime(last_failure)}",
+    ]
+
+
+# ---------------------------------------------------------------------------
+# Section replacement in file content
+# ---------------------------------------------------------------------------
+
+# Matches a heading line like "#### Current State" or "#### Statistics"
+_HEADING_RE = re.compile(r"^(#{1,6})\s+(.+)$")
+
+
+def _find_section_range(
+    lines: list[str],
+    section_title: str,
+    search_start: int = 0,
+    search_end: int | None = None,
+) -> tuple[int, int] | None:
+    """Find the line range [start, end) of a ``####``-level section.
+
+    Returns the range of lines from the heading itself up to (but not
+    including) the next heading at the same or higher level, a ``---``
+    separator, a ``**Detailed`` link line, or EOF.
+    """
+    end = search_end if search_end is not None else len(lines)
+    start_idx = None
+    section_level = None
+
+    for i in range(search_start, end):
+        m = _HEADING_RE.match(lines[i])
+        if m:
+            level = len(m.group(1))
+            title = m.group(2).strip()
+            if title.lower() == section_title.lower() and start_idx is None:
+                start_idx = i
+                section_level = level
+                continue
+            # If we already found the section, stop at next heading
+            # at same or higher level.
+            if start_idx is not None and level <= section_level:
+                return (start_idx, i)
+
+        # Also stop at horizontal rules or detailed-output links
+        if start_idx is not None:
+            stripped = lines[i].strip()
+            if stripped == "---":
+                return (start_idx, i)
+            if stripped.startswith("**Detailed"):
+                return (start_idx, i)
+
+    if start_idx is not None:
+        return (start_idx, end)
+    return None
+
+
+def _find_task_block_range(
+    lines: list[str], task: Task
+) -> tuple[int, int] | None:
+    """Find the line range [start, end) that contains the task's block.
+
+    Fast path: use ``task.heading_line`` if the heading still matches.
+    Fallback: search by title.
+    """
+    # Fast path: heading line index
+    if 0 <= task.heading_line < len(lines):
+        m = _HEADING_RE.match(lines[task.heading_line])
+        if m and m.group(2).strip() == task.title:
+            h_level = len(m.group(1))
+            # Block ends at next heading at same or higher level, or EOF
+            block_end = len(lines)
+            for i in range(task.heading_line + 1, len(lines)):
+                hm = _HEADING_RE.match(lines[i])
+                if hm and len(hm.group(1)) <= h_level:
+                    block_end = i
+                    break
+            return (task.heading_line, block_end)
+
+    # Fallback: search by title
+    for i, line in enumerate(lines):
+        m = _HEADING_RE.match(line)
+        if m and m.group(2).strip() == task.title:
+            h_level = len(m.group(1))
+            block_end = len(lines)
+            for j in range(i + 1, len(lines)):
+                hm = _HEADING_RE.match(lines[j])
+                if hm and len(hm.group(1)) <= h_level:
+                    block_end = j
+                    break
+            return (i, block_end)
+
+    return None
+
+
+def _replace_or_insert_section(
+    lines: list[str],
+    section_title: str,
+    new_section_lines: list[str],
+    block_start: int,
+    block_end: int,
+) -> list[str]:
+    """Replace a section within a task block, or insert it if missing.
+
+    The section is searched within ``lines[block_start:block_end]``.
+    If not found, the new section is appended at the end of the block.
+    """
+    section_range = _find_section_range(
+        lines, section_title, search_start=block_start, search_end=block_end
+    )
+
+    if section_range is not None:
+        s_start, s_end = section_range
+        return lines[:s_start] + new_section_lines + [""] + lines[s_end:]
+    else:
+        # Insert before block_end (before the next heading / EOF).
+        # Add a blank line before the section if the preceding line isn't blank.
+        insert_at = block_end
+        prefix = []
+        if insert_at > 0 and lines[insert_at - 1].strip() != "":
+            prefix = [""]
+        return (
+            lines[:insert_at]
+            + prefix
+            + new_section_lines
+            + [""]
+            + lines[insert_at:]
+        )
+
+
+# ---------------------------------------------------------------------------
+# Atomic file write
+# ---------------------------------------------------------------------------
+
+
+def _atomic_write(file_path: Path, content: str) -> None:
+    """Write *content* to *file_path* atomically (temp file + rename)."""
+    file_path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp_path = tempfile.mkstemp(
+        dir=file_path.parent, suffix=".tmp", prefix=".obs-tasks-"
+    )
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(content)
+        os.replace(tmp_path, file_path)
+    except Exception:
+        # Clean up temp file on failure
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
+        raise
+
+
+# ---------------------------------------------------------------------------
+# Public API
+# ---------------------------------------------------------------------------
+
+
+def update_task_state(
+    task: Task,
+    result: ExecutionResult,
+    next_run: datetime | None = None,
+) -> None:
+    """Update the ``#### Current State`` section in the task's source file.
+
+    Also updates ``#### Statistics`` in the same write.
+    """
+    if task.file_path is None:
+        logger.error("Cannot update task '%s': no file_path", task.title)
+        return
+
+    file_path = Path(task.file_path)
+    if not file_path.exists():
+        logger.error("Task file does not exist: %s", file_path)
+        return
+
+    content = file_path.read_text(encoding="utf-8")
+    lines = content.splitlines()
+
+    block_range = _find_task_block_range(lines, task)
+    if block_range is None:
+        logger.error(
+            "Could not find task '%s' in %s", task.title, file_path
+        )
+        return
+
+    block_start, block_end = block_range
+
+    # Compute new state values
+    status = TaskStatus.SUCCESS if result.success else TaskStatus.FAILED
+    last_run = result.started_at
+    duration = result.duration
+    summary = result.summary
+
+    # Compute new statistics
+    total_runs = task.total_runs + 1
+    successful_runs = task.successful_runs + (1 if result.success else 0)
+    failed_runs = task.failed_runs + (0 if result.success else 1)
+    last_failure = (
+        result.started_at if not result.success else task.last_failure
+    )
+
+    # Build new section lines
+    state_lines = build_current_state_lines(
+        status, last_run, next_run, duration, summary
+    )
+    stats_lines = build_statistics_lines(
+        total_runs, successful_runs, failed_runs, last_failure
+    )
+
+    # Replace/insert Current State first, then Statistics.
+    # After replacing Current State, block_end may shift, so we
+    # re-find the block range for Statistics.
+    lines = _replace_or_insert_section(
+        lines, "Current State", state_lines, block_start, block_end
+    )
+
+    # Re-find block range (it may have shifted)
+    block_range = _find_task_block_range(lines, task)
+    if block_range is not None:
+        block_start, block_end = block_range
+
+    lines = _replace_or_insert_section(
+        lines, "Statistics", stats_lines, block_start, block_end
+    )
+
+    new_content = "\n".join(lines)
+    # Ensure file ends with newline
+    if not new_content.endswith("\n"):
+        new_content += "\n"
+
+    _atomic_write(file_path, new_content)
+    logger.info("Updated state for task '%s' in %s", task.title, file_path)
+
+
+def create_report(
+    task: Task,
+    result: ExecutionResult,
+    reports_dir: Path,
+) -> Path:
+    """Create a detailed report file for an execution.
+
+    Returns the path to the created report file.
+    """
+    date_str = result.started_at.strftime("%Y-%m-%d")
+    slug = slugify(task.title)
+    filename = f"{date_str}-{slug}.md"
+    report_path = reports_dir / filename
+
+    status_text = "✅ Success" if result.success else "❌ Failed"
+
+    # Build the source file backlink (Obsidian wiki-link style)
+    source_link = ""
+    if task.file_path is not None:
+        # Use relative name without .md extension for Obsidian link
+        source_name = Path(task.file_path).stem
+        source_link = f"- Back to [[{source_name}]]"
+
+    # Build report content
+    report_lines = [
+        f"# {task.title} - Execution Report",
+        "",
+        f"**Executed:** {_format_datetime(result.started_at)}",
+        f"**Duration:** {result.duration:.1f} seconds",
+        f"**Command:** `{task.command}`",
+        f"**Exit Code:** {result.exit_code}",
+        f"**Status:** {status_text}",
+        "",
+        "## Output",
+        "",
+        "```",
+        result.stdout.rstrip() if result.stdout else "(no output)",
+        "```",
+    ]
+
+    # Add stderr section if present
+    if result.stderr and result.stderr.strip():
+        report_lines += [
+            "",
+            "## Errors",
+            "",
+            "```",
+            result.stderr.rstrip(),
+            "```",
+        ]
+
+    # Add links section
+    report_lines += [
+        "",
+        "## Links",
+    ]
+    if source_link:
+        report_lines.append(source_link)
+
+    report_lines += [
+        "",
+        "---",
+        "*Generated by Obsidian Task Automation*",
+    ]
+
+    content = "\n".join(report_lines) + "\n"
+    _atomic_write(report_path, content)
+    logger.info("Created report: %s", report_path)
+    return report_path
