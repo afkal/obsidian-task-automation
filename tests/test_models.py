@@ -153,7 +153,7 @@ class TestConfig:
         config = Config(vault_path=tmp_path / "vault")
         assert config.tasks_path == tmp_path / "vault" / "Tasks"
         assert config.reports_path == tmp_path / "vault" / "Reports"
-        assert config.state_path == tmp_path / "vault" / ".task-runner.md"
+        assert config.state_path == tmp_path / "vault" / "Task Runner.md"
 
     def test_save_and_load(self, tmp_path):
         config_file = tmp_path / "config.json"
@@ -186,7 +186,7 @@ class TestConfig:
         config = Config(vault_path=Path("/vault"))
         assert config.task_folder == "Tasks"
         assert config.reports_folder == "Reports"
-        assert config.state_file == ".task-runner.md"
+        assert config.state_file == "Task Runner.md"
         assert config.check_interval == 60
         assert config.command_timeout == 300
         assert config.log_level == "INFO"

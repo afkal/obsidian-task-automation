@@ -19,7 +19,7 @@ class Config:
     vault_path: Path
     task_folder: str = "Tasks"
     reports_folder: str = "Reports"
-    state_file: str = ".task-runner.md"
+    state_file: str = "Task Runner.md"
     check_interval: int = 60
     command_timeout: int = 300
     log_level: str = "INFO"
