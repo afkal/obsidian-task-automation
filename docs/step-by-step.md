@@ -26,14 +26,14 @@ Obsidian Vault (.md files)
     ↕ read/write
 Python Task Runner
     ├─ parser.py      → reads .md → Task objects
-    ├─ scheduler.py   → decides when to run (croniter + catch-up)
     ├─ executor.py    → runs shell commands (subprocess)
     ├─ writer.py      → updates .md with results + creates reports
     ├─ state.py       → system state in .task-runner.md
     ├─ models.py      → dataclasses (Task, ExecutionResult, etc.)
     ├─ config.py      → Config dataclass, JSON persistence
     ├─ cli.py         → Click CLI (obs-tasks command)
-    └─ main.py        → TaskRunner service loop
+    ├─ scheduler.py   → decides when to run (croniter + catch-up)  [post-MVP]
+    └─ main.py        → TaskRunner service loop                    [post-MVP]
 ```
 
 Package layout: `src/obs_tasks/`, entry point: `obs-tasks = "obs_tasks.cli:cli"`
@@ -53,6 +53,12 @@ Package layout: `src/obs_tasks/`, entry point: `obs-tasks = "obs_tasks.cli:cli"`
 ## Implementation Steps
 
 Work through these steps in order. Each step builds on the previous. Write tests alongside the code (TDD). Run `pytest` after each step to verify nothing is broken.
+
+### MVP Scope
+
+**Absolute MVP (Steps 1–9):** Manual task execution via CLI and Obsidian Shell Commands plugin. Parse → execute → write → report. No scheduling, no background service.
+
+**Post-MVP:** Scheduled background execution (scheduler.py, main.py service loop, catch-up recovery).
 
 ---
 
@@ -145,7 +151,35 @@ CLI was prioritised before scheduler since manual triggering is the primary use 
 
 ---
 
-### Step 8: Scheduler
+### Step 8: Integration Tests
+
+- [ ] Update `tests/conftest.py` with shared fixtures: `sample_vault` (tmp_path with realistic task files), `sample_config`
+- [ ] `tests/test_integration.py` — end-to-end tests for the manual execution pipeline:
+  - Full pipeline: parse → execute → write → re-parse → verify state updated
+  - Failed task: verify failure status and statistics
+  - Multiple tasks execute sequentially without interference
+  - Command/Schedule lines survive multiple execution cycles
+  - Report files are created correctly
+  - Statistics accumulate over repeated executions
+  - CLI init + list + run work end-to-end
+- [ ] Verify: all tests pass (unit + integration)
+
+---
+
+### Step 9: Polish
+
+- [ ] Improve error messages: clear guidance when vault not initialized, no tasks found, command failures
+- [ ] Write `README.md`: installation, quick start, task format reference, CLI commands, Obsidian Shell Commands setup, troubleshooting
+- [ ] Final pass: remove dead code, ensure consistent style
+- [ ] Final verify: `pytest --cov=obs_tasks` — all green, reasonable coverage
+
+---
+
+## Post-MVP: Scheduled Background Execution
+
+> These steps add automatic scheduled execution. The absolute MVP works without them — manual triggering via CLI and Obsidian Shell Commands is fully functional.
+
+### Post-MVP Step A: Scheduler
 
 - [ ] `src/obs_tasks/scheduler.py` — scheduling logic using croniter
 - [ ] `calculate_next_run()` — croniter-based next execution time
@@ -157,7 +191,7 @@ CLI was prioritised before scheduler since manual triggering is the primary use 
 
 ---
 
-### Step 9: Main Service Loop (future)
+### Post-MVP Step B: Main Service Loop
 
 - [ ] `src/obs_tasks/main.py` — `TaskRunner` class that orchestrates everything
 - [ ] `startup()` — load state, parse tasks, validate schedules, run catch-up for missed tasks
@@ -166,34 +200,8 @@ CLI was prioritised before scheduler since manual triggering is the primary use 
 - [ ] `_execute_and_record()` — execute task, update markdown, create report, update system state, calculate next_run
 - [ ] `shutdown()` — graceful exit with signal handlers (SIGTERM, SIGINT)
 - [ ] Error isolation: one failed tick must not crash the loop
-- [ ] Verify: tested via integration tests in next step
-
----
-
-### Step 10: Integration Tests
-
-- [ ] Update `tests/conftest.py` with shared fixtures: `sample_vault` (tmp_path with realistic task files), `sample_config`
-- [ ] `tests/test_integration.py` — end-to-end tests:
-  - Full pipeline: parse → execute → write → re-parse → verify state updated
-  - Failed task: verify failure status and statistics
-  - Catch-up after simulated restart
-  - State persistence across StateManager instances
-  - Multiple tasks execute sequentially without interference
-  - Command/Schedule lines survive multiple execution cycles
-  - Report files are created correctly
-  - Statistics accumulate over repeated executions
-  - CLI init + list + run work end-to-end
-- [ ] Verify: all tests pass (unit + integration)
-
----
-
-### Step 11: Polish
-
-- [ ] Set up logging: file handler to `~/.obs-tasks/obs-tasks.log`, 7-day rotation, configurable level
-- [ ] Improve error messages: clear guidance when vault not initialized, no tasks found, invalid cron expressions
-- [ ] Write `README.md`: installation, quick start, task format reference, CLI commands, troubleshooting
-- [ ] Final pass: remove dead code, ensure consistent style
-- [ ] Final verify: `pytest --cov=obs_tasks` — all green, reasonable coverage
+- [ ] CLI `start` / `stop` / `status` commands
+- [ ] Verify: tested via integration tests
 
 ---
 
@@ -234,9 +242,9 @@ obsidian-task-automation/
 │   ├── executor.py
 │   ├── writer.py
 │   ├── state.py
-│   ├── scheduler.py
 │   ├── cli.py
-│   └── main.py
+│   ├── scheduler.py          [post-MVP]
+│   └── main.py               [post-MVP]
 ├── tests/
 │   ├── __init__.py
 │   ├── conftest.py
@@ -245,9 +253,9 @@ obsidian-task-automation/
 │   ├── test_executor.py
 │   ├── test_writer.py
 │   ├── test_state.py
-│   ├── test_scheduler.py
 │   ├── test_cli.py
-│   └── test_integration.py
+│   ├── test_integration.py
+│   └── test_scheduler.py     [post-MVP]
 ├── docs/
 │   ├── mvp-specification.md
 │   └── step-by-step.md

@@ -256,9 +256,97 @@ class TestRunByFile:
         assert result.exit_code == 0  # CLI exits 0, task itself failed
         assert "Failed" in result.output
 
+    def test_run_file_no_valid_task(
+        self, runner: CliRunner, vault: Path, config_file: Path
+    ) -> None:
+        """File with no Command/Schedule → 'No tasks found'."""
+        empty_file = vault / "Tasks" / "Empty.md"
+        empty_file.write_text("Just some notes.\n", encoding="utf-8")
+        result = runner.invoke(cli, ["run", "-f", str(empty_file)])
+        assert result.exit_code != 0
+
+    def test_run_stderr_output(
+        self, runner: CliRunner, vault: Path, config_file: Path
+    ) -> None:
+        """Commands that write to stderr show error output."""
+        err_file = vault / "Tasks" / "Stderr Task.md"
+        err_file.write_text(
+            """\
+#### Task Definition
+- Command: `echo error >&2`
+- Schedule: 0 * * * *
+""",
+            encoding="utf-8",
+        )
+        result = runner.invoke(cli, ["run", "-f", str(err_file)])
+        assert result.exit_code == 0
+        assert "error" in result.output
+
     def test_run_no_args(
         self, runner: CliRunner, config_file: Path
     ) -> None:
         result = runner.invoke(cli, ["run"])
         assert result.exit_code != 0
         assert "Provide a task name or --file" in result.output
+
+
+# ---------------------------------------------------------------------------
+# run — multiple match / ambiguous name
+# ---------------------------------------------------------------------------
+
+
+class TestRunAmbiguous:
+    def test_run_multiple_matches(
+        self, runner: CliRunner, vault: Path, config_file: Path
+    ) -> None:
+        """When multiple tasks match the name, show an error."""
+        (vault / "Tasks" / "Echo Two.md").write_text(
+            """\
+#### Task Definition
+- Command: `echo second`
+- Schedule: 0 * * * *
+""",
+            encoding="utf-8",
+        )
+        result = runner.invoke(cli, ["run", "echo"])
+        assert result.exit_code != 0
+        assert "Multiple tasks match" in result.output
+        assert "Echo Task" in result.output
+        assert "Echo Two" in result.output
+
+
+# ---------------------------------------------------------------------------
+# list — verbose with run history
+# ---------------------------------------------------------------------------
+
+
+class TestListVerboseWithHistory:
+    def test_list_verbose_after_run(
+        self, runner: CliRunner, vault: Path, config_file: Path
+    ) -> None:
+        """After running a task, --verbose shows last_run and run counts."""
+        runner.invoke(cli, ["run", "Echo Task"])
+        result = runner.invoke(cli, ["list", "-v"])
+        assert result.exit_code == 0
+        assert "Last Run:" in result.output
+        assert "1 ok" in result.output
+
+
+# ---------------------------------------------------------------------------
+# config errors
+# ---------------------------------------------------------------------------
+
+
+class TestConfigErrors:
+    def test_invalid_config_json(
+        self, runner: CliRunner, tmp_path: Path, monkeypatch
+    ) -> None:
+        """Corrupt config.json shows a clear error."""
+        cfg = tmp_path / "bad" / "config.json"
+        cfg.parent.mkdir(parents=True)
+        cfg.write_text("not valid json!!!", encoding="utf-8")
+        monkeypatch.setattr("obs_tasks.cli.CONFIG_FILE", cfg)
+        monkeypatch.setattr("obs_tasks.config.CONFIG_FILE", cfg)
+
+        result = runner.invoke(cli, ["list"])
+        assert result.exit_code != 0
