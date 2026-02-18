@@ -2,12 +2,22 @@
 
 Python CLI tool that reads task definitions from Obsidian Markdown files, executes them, and writes results back to Markdown. All task state lives in the vault — no databases, no external state files.
 
+![Task view in Obsidian](docs/images/task-view.png)
+
+## Features
+
+- **All state in Markdown** — task definitions, execution results, statistics and run history live in your vault
+- **Run History** — each task file includes a table of recent executions with status, duration and links to detailed reports
+- **Obsidian integration** — report links use `[[wiki-links]]` so you can click through from the history table directly to full execution reports
+- **Shell Commands plugin support** — trigger tasks from Obsidian's UI with a single click
+- **No external dependencies** — no databases, no cloud services, just Markdown files
+
 ## Installation
 
 Requires Python 3.13+.
 
 ```bash
-git clone https://github.com/your-user/obsidian-task-automation.git
+git clone https://github.com/afkal/obsidian-task-automation.git
 cd obsidian-task-automation
 python -m venv .venv
 .venv/bin/pip install -e ".[dev]"
@@ -52,11 +62,18 @@ Each `.md` file in `Tasks/` is one task. The filename (without `.md`) is the tas
 - Successful: 46
 - Failed: 1
 - Last Failure: 2024-11-15 02:00:00
+
+#### Run History
+| Time | Status | Duration | Report |
+|------|--------|----------|--------|
+| 2024-12-16 02:00:15 | ✅ | 45.2s | [[2024-12-16-020015-backup-docs]] |
+| 2024-12-15 02:00:12 | ✅ | 44.8s | [[2024-12-15-020012-backup-docs]] |
+| 2024-12-14 02:00:09 | ❌ | 1.2s | [[2024-12-14-020009-backup-docs]] |
 ```
 
 **You write:** `#### Task Definition` with `- Command:` and `- Schedule:` lines.
 
-**The tool writes:** `#### Current State` and `#### Statistics` sections after each run.
+**The tool writes:** `#### Current State`, `#### Statistics` and `#### Run History` sections after each run. The history table shows the 20 most recent executions with clickable `[[wiki-links]]` to detailed report files.
 
 You can add any other headings or notes (e.g. `#### Notes`) — they won't be touched.
 
@@ -93,6 +110,8 @@ Each execution creates a report in `Reports/` with:
 - Obsidian backlink to the task file (`[[Task Name]]`)
 
 Report filenames: `YYYY-MM-DD-HHMMSS-task-slug.md`
+
+Reports are automatically linked in the task file's **Run History** table — click any `[[report]]` link in Obsidian to jump to the full execution details.
 
 ## Development
 
