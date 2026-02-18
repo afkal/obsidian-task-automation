@@ -182,9 +182,9 @@ def run(task_name: str | None, file_path: str | None) -> None:
         task.id, task.command, timeout=config.command_timeout
     )
 
-    # Write results back
-    update_task_state(task, result)
+    # Write results back (create report first so we can link it in history)
     report_path = create_report(task, result, config.reports_path)
+    update_task_state(task, result, report_path=report_path)
 
     # Show result
     if result.success:

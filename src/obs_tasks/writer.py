@@ -2,7 +2,8 @@
 
 Design rules:
 - Never modify user content (Command, Schedule, notes).
-- Only touch ``#### Current State`` and ``#### Statistics`` sections.
+- Only touch ``#### Current State``, ``#### Statistics``, and
+  ``#### Run History`` sections.
 - Atomic file writes: write to temp file then rename.
 - Create report files with full output, metadata and Obsidian backlinks.
 """
@@ -92,6 +93,72 @@ def build_statistics_lines(
         f"- Failed: {failed_runs}",
         f"- Last Failure: {_format_datetime(last_failure)}",
     ]
+
+
+# ---------------------------------------------------------------------------
+# Run History
+# ---------------------------------------------------------------------------
+
+MAX_HISTORY_ROWS = 20
+"""Maximum number of rows kept in the Run History table."""
+
+_HISTORY_HEADER = [
+    "#### Run History",
+    "| Time | Status | Duration | Report |",
+    "|------|--------|----------|--------|",
+]
+
+
+def _parse_history_rows(
+    lines: list[str],
+    section_range: tuple[int, int],
+) -> list[str]:
+    """Extract data rows from an existing Run History table.
+
+    Returns a list of ``| … |`` data lines (excludes the heading, header
+    row and separator row).
+    """
+    start, end = section_range
+    rows: list[str] = []
+    for i in range(start, end):
+        line = lines[i].strip()
+        # Skip heading, header row, separator row, and blanks
+        if not line or line.startswith("#") or line.startswith("|---"):
+            continue
+        if line.startswith("| Time"):
+            continue
+        if line.startswith("|"):
+            rows.append(line)
+    return rows
+
+
+def build_run_history_lines(
+    existing_rows: list[str],
+    result: ExecutionResult,
+    report_name: str | None = None,
+) -> list[str]:
+    """Build the full ``#### Run History`` section lines.
+
+    Prepends a new row for *result*, keeps at most
+    :data:`MAX_HISTORY_ROWS` rows.
+    """
+    status_emoji = "✅" if result.success else "❌"
+    time_str = result.started_at.strftime("%Y-%m-%d %H:%M:%S")
+    duration_str = _format_duration(result.duration)
+
+    if report_name:
+        # Obsidian wiki-link without .md extension
+        report_link = f"[[{report_name}]]"
+    else:
+        report_link = "-"
+
+    new_row = f"| {time_str} | {status_emoji} | {duration_str} | {report_link} |"
+
+    all_rows = [new_row] + existing_rows
+    # Truncate to max rows
+    all_rows = all_rows[:MAX_HISTORY_ROWS]
+
+    return _HISTORY_HEADER + all_rows
 
 
 # ---------------------------------------------------------------------------
@@ -223,10 +290,13 @@ def update_task_state(
     task: Task,
     result: ExecutionResult,
     next_run: datetime | None = None,
+    report_path: Path | None = None,
 ) -> None:
     """Update the ``#### Current State`` section in the task's source file.
 
-    Also updates ``#### Statistics`` in the same write.
+    Also updates ``#### Statistics`` and ``#### Run History`` in the same
+    write.  Pass *report_path* to include an Obsidian wiki-link in the
+    history table.
     """
     if task.file_path is None:
         logger.error("Cannot update task '%s': no file_path", task.title)
@@ -276,6 +346,29 @@ def update_task_state(
 
     lines = _replace_or_insert_section(
         lines, "Statistics", stats_lines, block_start, block_end
+    )
+
+    # --- Run History ---
+    # Re-find block range again (may have shifted after Statistics)
+    block_start, block_end = _find_task_block_range(lines, task)
+
+    # Read existing history rows (if any)
+    history_range = _find_section_range(
+        lines, "Run History", search_start=block_start, search_end=block_end
+    )
+    existing_rows = (
+        _parse_history_rows(lines, history_range) if history_range else []
+    )
+
+    # Build report name for wiki-link (stem without .md)
+    report_name = report_path.stem if report_path else None
+
+    history_lines = build_run_history_lines(
+        existing_rows, result, report_name
+    )
+
+    lines = _replace_or_insert_section(
+        lines, "Run History", history_lines, block_start, block_end
     )
 
     new_content = "\n".join(lines)

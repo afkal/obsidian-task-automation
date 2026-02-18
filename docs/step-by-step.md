@@ -168,10 +168,10 @@ CLI was prioritised before scheduler since manual triggering is the primary use 
 
 ### Step 9: Polish
 
-- [ ] Improve error messages: clear guidance when vault not initialized, no tasks found, command failures
-- [ ] Write `README.md`: installation, quick start, task format reference, CLI commands, Obsidian Shell Commands setup, troubleshooting
-- [ ] Final pass: remove dead code, ensure consistent style
-- [ ] Final verify: `pytest --cov=obs_tasks` — all green, reasonable coverage
+- [x] Improve error messages: clear guidance when vault not initialized, no tasks found, command failures
+- [x] Write `README.md`: installation, quick start, task format reference, CLI commands, Obsidian Shell Commands setup, troubleshooting
+- [x] Final pass: remove dead code, ensure consistent style
+- [x] Final verify: `pytest --cov=obs_tasks` — 185 tests, 98% coverage
 
 ---
 
@@ -226,9 +226,16 @@ One file per task. Filename = task title (e.g. `Backup Docs.md` → title "Backu
 - Successful: 46
 - Failed: 1
 - Last Failure: 2024-11-15 02:00:00
+
+#### Run History
+| Time | Status | Duration | Report |
+|------|--------|----------|--------|
+| 2024-12-16 02:00:15 | ✅ | 45.2s | [[2024-12-16-020015-backup-docs]] |
+| 2024-12-15 02:00:12 | ✅ | 44.8s | [[2024-12-15-020012-backup-docs]] |
+| 2024-12-14 02:00:09 | ❌ | 1.2s | [[2024-12-14-020009-backup-docs]] |
 ```
 
-Headings inside the file are optional — the parser only looks for `- Command:` and `- Schedule:` lines.
+Headings inside the file are optional — the parser only looks for `- Command:` and `- Schedule:` lines. The Run History table is limited to the 20 most recent rows.
 
 ## File Structure (Target)
 

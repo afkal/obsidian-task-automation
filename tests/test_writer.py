@@ -9,10 +9,13 @@ import pytest
 
 from obs_tasks.models import ExecutionResult, Task, TaskStatus
 from obs_tasks.writer import (
+    MAX_HISTORY_ROWS,
     _atomic_write,
     _find_section_range,
     _find_task_block_range,
+    _parse_history_rows,
     build_current_state_lines,
+    build_run_history_lines,
     build_statistics_lines,
     create_report,
     update_task_state,
@@ -631,3 +634,285 @@ class TestCreateReport:
         content = path.read_text(encoding="utf-8")
 
         assert "(no output)" in content
+
+
+# ---------------------------------------------------------------------------
+# _parse_history_rows
+# ---------------------------------------------------------------------------
+
+
+class TestParseHistoryRows:
+    def test_extracts_data_rows(self) -> None:
+        lines = [
+            "#### Run History",
+            "| Time | Status | Duration | Report |",
+            "|------|--------|----------|--------|",
+            "| 2025-01-15 10:30:00 | ✅ | 2.5s | [[report-1]] |",
+            "| 2025-01-14 10:00:00 | ❌ | 1.0s | [[report-2]] |",
+        ]
+        rows = _parse_history_rows(lines, (0, 5))
+        assert len(rows) == 2
+        assert "2025-01-15" in rows[0]
+        assert "2025-01-14" in rows[1]
+
+    def test_empty_section(self) -> None:
+        lines = [
+            "#### Run History",
+            "| Time | Status | Duration | Report |",
+            "|------|--------|----------|--------|",
+        ]
+        rows = _parse_history_rows(lines, (0, 3))
+        assert rows == []
+
+    def test_skips_blank_lines(self) -> None:
+        lines = [
+            "#### Run History",
+            "| Time | Status | Duration | Report |",
+            "|------|--------|----------|--------|",
+            "| 2025-01-15 10:30:00 | ✅ | 2.5s | [[r1]] |",
+            "",
+            "| 2025-01-14 10:00:00 | ❌ | 1.0s | [[r2]] |",
+        ]
+        rows = _parse_history_rows(lines, (0, 6))
+        assert len(rows) == 2
+
+    def test_handles_partial_range(self) -> None:
+        """Only reads rows within the given range."""
+        lines = [
+            "some other content",
+            "#### Run History",
+            "| Time | Status | Duration | Report |",
+            "|------|--------|----------|--------|",
+            "| 2025-01-15 10:30:00 | ✅ | 2.5s | [[r1]] |",
+            "#### Next Section",
+        ]
+        rows = _parse_history_rows(lines, (1, 5))
+        assert len(rows) == 1
+
+
+# ---------------------------------------------------------------------------
+# build_run_history_lines
+# ---------------------------------------------------------------------------
+
+
+class TestBuildRunHistoryLines:
+    def test_first_run(self) -> None:
+        """First execution creates a table with one data row."""
+        result = _make_result()
+        lines = build_run_history_lines([], result, "2025-01-15-103000-backup-docs")
+        assert lines[0] == "#### Run History"
+        assert "| Time |" in lines[1]
+        assert lines[2].startswith("|---")
+        assert len(lines) == 4  # header(3) + 1 data row
+        assert "2025-01-15 10:30:00" in lines[3]
+        assert "✅" in lines[3]
+        assert "2.5s" in lines[3]
+        assert "[[2025-01-15-103000-backup-docs]]" in lines[3]
+
+    def test_prepends_new_row(self) -> None:
+        """New row appears before existing rows."""
+        existing = ["| 2025-01-14 10:00:00 | ✅ | 1.0s | [[old-report]] |"]
+        result = _make_result()
+        lines = build_run_history_lines(
+            existing, result, "2025-01-15-103000-backup-docs"
+        )
+        # 3 header lines + 2 data rows
+        assert len(lines) == 5
+        # New row first (after header)
+        assert "2025-01-15 10:30:00" in lines[3]
+        # Old row second
+        assert "2025-01-14 10:00:00" in lines[4]
+
+    def test_truncates_to_max_rows(self) -> None:
+        """Table never exceeds MAX_HISTORY_ROWS data rows."""
+        existing = [
+            f"| 2025-01-{i:02d} 00:00:00 | ✅ | 1.0s | [[r{i}]] |"
+            for i in range(1, MAX_HISTORY_ROWS + 5)  # 24 rows
+        ]
+        result = _make_result()
+        lines = build_run_history_lines(existing, result, "new-report")
+        data_rows = [l for l in lines if l.startswith("|") and not l.startswith("|---") and "Time" not in l]
+        assert len(data_rows) == MAX_HISTORY_ROWS
+
+    def test_failure_emoji(self) -> None:
+        """Failed execution shows ❌ emoji."""
+        result = _make_result(success=False, exit_code=1)
+        lines = build_run_history_lines([], result, "report")
+        assert "❌" in lines[3]
+
+    def test_without_report_name(self) -> None:
+        """When no report is provided, shows '-' instead of link."""
+        result = _make_result()
+        lines = build_run_history_lines([], result, None)
+        # Last column should be "-"
+        assert "| - |" in lines[3]
+
+    def test_duration_formatting(self) -> None:
+        """Duration uses the same format as Current State."""
+        result = _make_result(duration=123.456)
+        lines = build_run_history_lines([], result, None)
+        assert "123.5s" in lines[3]
+
+
+# ---------------------------------------------------------------------------
+# update_task_state — Run History integration
+# ---------------------------------------------------------------------------
+
+
+class TestUpdateTaskStateRunHistory:
+    def test_creates_run_history_section(self, tmp_path: Path) -> None:
+        """Run History section is created on first execution."""
+        f = tmp_path / "task.md"
+        f.write_text(
+            """\
+#### Task Definition
+- Command: `echo backup`
+- Schedule: 0 2 * * *
+""",
+            encoding="utf-8",
+        )
+        task = _make_task(file_path=f)
+        result = _make_result()
+        report = tmp_path / "Reports" / "2025-01-15-103000-backup-docs.md"
+        update_task_state(task, result, report_path=report)
+
+        content = f.read_text(encoding="utf-8")
+        assert "#### Run History" in content
+        assert "| Time |" in content
+        assert "2025-01-15 10:30:00" in content
+        assert "[[2025-01-15-103000-backup-docs]]" in content
+
+    def test_accumulates_history_rows(self, tmp_path: Path) -> None:
+        """Multiple executions add rows to the table."""
+        f = tmp_path / "task.md"
+        f.write_text(
+            """\
+#### Task Definition
+- Command: `echo backup`
+- Schedule: 0 2 * * *
+""",
+            encoding="utf-8",
+        )
+        # Run 1
+        task = _make_task(file_path=f)
+        result1 = _make_result(
+            duration=1.0,
+            stdout="run1",
+        )
+        result1 = ExecutionResult(
+            task_id="backup-docs",
+            success=True,
+            exit_code=0,
+            stdout="run1",
+            stderr="",
+            started_at=datetime(2025, 1, 14, 10, 0, 0),
+            finished_at=datetime(2025, 1, 14, 10, 0, 1),
+            duration=1.0,
+        )
+        report1 = tmp_path / "Reports" / "2025-01-14-100000-backup-docs.md"
+        update_task_state(task, result1, report_path=report1)
+
+        # Run 2
+        from obs_tasks.parser import parse_file
+
+        tasks = parse_file(f)
+        task2 = tasks[0]
+        result2 = ExecutionResult(
+            task_id="backup-docs",
+            success=True,
+            exit_code=0,
+            stdout="run2",
+            stderr="",
+            started_at=datetime(2025, 1, 15, 10, 0, 0),
+            finished_at=datetime(2025, 1, 15, 10, 0, 2),
+            duration=2.0,
+        )
+        report2 = tmp_path / "Reports" / "2025-01-15-100000-backup-docs.md"
+        update_task_state(task2, result2, report_path=report2)
+
+        content = f.read_text(encoding="utf-8")
+        # Both runs should appear
+        assert "2025-01-15 10:00:00" in content
+        assert "2025-01-14 10:00:00" in content
+        # Newer run should be first (closer to header)
+        idx_new = content.index("2025-01-15 10:00:00")
+        idx_old = content.index("2025-01-14 10:00:00")
+        assert idx_new < idx_old
+
+    def test_without_report_path(self, tmp_path: Path) -> None:
+        """Run History works without a report_path (shows '-')."""
+        f = tmp_path / "task.md"
+        f.write_text(
+            """\
+#### Task Definition
+- Command: `echo test`
+- Schedule: 0 * * * *
+""",
+            encoding="utf-8",
+        )
+        task = _make_task(file_path=f)
+        result = _make_result()
+        update_task_state(task, result)  # no report_path
+
+        content = f.read_text(encoding="utf-8")
+        assert "#### Run History" in content
+        assert "| - |" in content  # no report link
+
+    def test_max_rows_enforced(self, tmp_path: Path) -> None:
+        """Run History table doesn't grow beyond MAX_HISTORY_ROWS."""
+        f = tmp_path / "task.md"
+        # Build a file with an existing Run History at max capacity
+        history_rows = []
+        for i in range(MAX_HISTORY_ROWS):
+            history_rows.append(
+                f"| 2025-01-{i+1:02d} 00:00:00 | ✅ | 1.0s | [[r{i}]] |"
+            )
+
+        content = """\
+#### Task Definition
+- Command: `echo test`
+- Schedule: 0 * * * *
+
+#### Run History
+| Time | Status | Duration | Report |
+|------|--------|----------|--------|
+"""
+        content += "\n".join(history_rows) + "\n"
+        f.write_text(content, encoding="utf-8")
+
+        task = _make_task(file_path=f)
+        result = _make_result()
+        update_task_state(task, result, report_path=tmp_path / "Reports" / "new.md")
+
+        updated = f.read_text(encoding="utf-8")
+        # Count data rows (lines starting with "| 20")
+        data_rows = [
+            l for l in updated.splitlines()
+            if l.strip().startswith("| 20")
+        ]
+        assert len(data_rows) == MAX_HISTORY_ROWS
+
+    def test_preserves_all_other_sections(self, tmp_path: Path) -> None:
+        """Run History addition doesn't disturb other sections."""
+        f = tmp_path / "task.md"
+        f.write_text(
+            """\
+#### Task Definition
+- Command: `echo backup`
+- Schedule: 0 2 * * *
+
+#### Notes
+Important user notes here.
+""",
+            encoding="utf-8",
+        )
+        task = _make_task(file_path=f)
+        result = _make_result()
+        update_task_state(task, result)
+
+        content = f.read_text(encoding="utf-8")
+        assert "#### Notes" in content
+        assert "Important user notes here." in content
+        assert "#### Current State" in content
+        assert "#### Statistics" in content
+        assert "#### Run History" in content

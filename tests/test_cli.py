@@ -208,6 +208,7 @@ class TestRunByName:
         assert "#### Current State" in content
         assert "Success" in content
         assert "Total Runs: 1" in content
+        assert "#### Run History" in content
 
     def test_run_creates_report(
         self, runner: CliRunner, vault: Path, config_file: Path
@@ -217,6 +218,12 @@ class TestRunByName:
         reports = list((vault / "Reports").glob("*.md"))
         assert len(reports) == 1
         assert "echo-task" in reports[0].name
+
+        # Report should also be linked in the task's Run History
+        task_file = vault / "Tasks" / "Echo Task.md"
+        content = task_file.read_text(encoding="utf-8")
+        report_stem = reports[0].stem
+        assert f"[[{report_stem}]]" in content
 
 
 # ---------------------------------------------------------------------------

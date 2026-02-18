@@ -45,9 +45,9 @@ class TestFullPipeline:
         assert result.success
         assert "hello world" in result.stdout
 
-        # 3. Write
-        update_task_state(task, result)
+        # 3. Write (create report first, then update state with report link)
         report = create_report(task, result, sample_vault / "Reports")
+        update_task_state(task, result, report_path=report)
         assert report.exists()
 
         # 4. Re-parse and verify state
@@ -60,6 +60,11 @@ class TestFullPipeline:
         assert updated.last_run is not None
         assert updated.duration is not None
         assert updated.duration >= 0
+
+        # 5. Verify Run History section with report link
+        content = task_file.read_text(encoding="utf-8")
+        assert "#### Run History" in content
+        assert f"[[{report.stem}]]" in content
 
     def test_failure_pipeline(self, sample_vault: Path) -> None:
         """Failed command updates state with failure info."""
@@ -101,6 +106,16 @@ class TestFullPipeline:
         assert final.total_runs == 3
         assert final.successful_runs == 3
         assert final.failed_runs == 0
+
+        # Verify Run History has 3 rows
+        content = task_file.read_text(encoding="utf-8")
+        assert "#### Run History" in content
+        # Count data rows (lines starting with "| 20")
+        data_rows = [
+            l for l in content.splitlines()
+            if l.strip().startswith("| 20")
+        ]
+        assert len(data_rows) == 3
 
     def test_mixed_success_and_failure_stats(self, tmp_path: Path) -> None:
         """Statistics track both successes and failures correctly."""
