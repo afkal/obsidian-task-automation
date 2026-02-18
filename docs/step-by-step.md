@@ -40,10 +40,10 @@ Package layout: `src/obs_tasks/`, entry point: `obs-tasks = "obs_tasks.cli:cli"`
 
 ## Key Design Rules
 
-1. **All data in Markdown** — no JSON state files, no databases. Config is the only exception (`~/.obs-tasks/config.json`).
+1. **All data in Markdown** — no JSON state files, no databases. Config is the only exception (`config.json` in project root).
 2. **Atomic file writes** — always write to temp file then rename. Never leave a half-written .md file.
-3. **Parser flexibility** — detect tasks by finding `- Command:` + `- Schedule:` lines, not by heading level. The task title is the nearest heading above those lines.
-4. **Never modify user content** — writer updates only `#### Current State` and `#### Statistics` sections. Command, Schedule, and any user notes are preserved exactly.
+3. **One file per task** — each .md file in Tasks/ is one task. The task title comes from the filename (without .md). Headings inside the file are optional and ignored by the parser.
+4. **Never modify user content** — writer updates only `#### Current State` and `#### Statistics` sections. Task Definition and any user notes are preserved exactly.
 5. **Recovery over precision** — on startup, compare `last_startup` from state file against each task's `next_run`. Any missed tasks get executed. Tasks that have never run execute immediately.
 6. **Re-parse every tick** — the main loop re-reads all task files each cycle (every 60s). This picks up user edits without needing file watchers.
 7. **Never raise from executor** — `execute_task()` always returns an `ExecutionResult`, even on timeout or crash.
@@ -129,7 +129,23 @@ Refer to `mvp-specification.md` lines 354–387 for the state file format.
 
 ---
 
-### Step 7: Scheduler
+### Step 7: CLI + Refactoring
+
+CLI was prioritised before scheduler since manual triggering is the primary use case. Several architectural changes were made alongside:
+
+- [x] `src/obs_tasks/cli.py` — full Click CLI: `init`, `list [--verbose]`, `run <name>` / `run --file <path>`
+- [x] `run --file` mode for Obsidian Shell Commands plugin (`obs-tasks run --file "{{file_path:absolute}}"`)
+- [x] Refactor parser: one file = one task, filename is task title (removed heading-based multi-task support)
+- [x] Simplify writer: `_find_task_block_range()` returns entire file (no heading search needed)
+- [x] Move config from `~/.obs-tasks/config.json` to project root (next to pyproject.toml), gitignored
+- [x] Add timestamps to report filenames (`YYYY-MM-DD-HHMMSS-slug.md`) to prevent overwrites
+- [x] Adopt `#### Task Definition` heading convention for Command/Schedule fields
+- [x] `tests/test_cli.py` — 18 tests using Click's CliRunner
+- [x] Verify: 166 tests pass
+
+---
+
+### Step 8: Scheduler
 
 - [ ] `src/obs_tasks/scheduler.py` — scheduling logic using croniter
 - [ ] `calculate_next_run()` — croniter-based next execution time
@@ -141,23 +157,7 @@ Refer to `mvp-specification.md` lines 354–387 for the state file format.
 
 ---
 
-### Step 8: CLI
-
-- [ ] `src/obs_tasks/cli.py` — full Click CLI replacing the placeholder
-- [ ] `init <vault_path>` — create config file, Tasks/ and Reports/ directories, initial state file
-- [ ] `list [--verbose]` — parse and display all tasks with status
-- [ ] `run <task_name>` — find task by name (case-insensitive partial match), execute, write results
-- [ ] `start [--foreground]` — launch the TaskRunner service (PID file for background mode)
-- [ ] `stop` — send SIGTERM to PID from file
-- [ ] `status` — show service state and task summary
-- [ ] `history [--limit N]` — list recent executions from report files
-- [ ] `tests/test_cli.py` — use Click's CliRunner to test each command
-- [ ] Verify: all tests pass
-- [ ] Manual smoke test: `obs-tasks init /tmp/test-vault && obs-tasks list`
-
----
-
-### Step 9: Main Service Loop
+### Step 9: Main Service Loop (future)
 
 - [ ] `src/obs_tasks/main.py` — `TaskRunner` class that orchestrates everything
 - [ ] `startup()` — load state, parse tasks, validate schedules, run catch-up for missed tasks
@@ -199,19 +199,15 @@ Refer to `mvp-specification.md` lines 354–387 for the state file format.
 
 ## Markdown Format Reference
 
-The parser must handle this task format (from the spec). The writer produces the `Current State` and `Statistics` sections:
+One file per task. Filename = task title (e.g. `Backup Docs.md` → title "Backup Docs"). The writer produces the `Current State` and `Statistics` sections:
 
 ```markdown
-### Task Title Here
-
-Description text (optional, preserved by writer).
-
 #### Task Definition
 - Command: `shell command to execute`
 - Schedule: 0 2 * * *
 
 #### Current State
-- Status: Success
+- Status: ✅ Success
 - Last Run: 2024-12-16 02:00:15
 - Next Run: 2024-12-17 02:00:00
 - Duration: 45.2s
@@ -222,9 +218,9 @@ Description text (optional, preserved by writer).
 - Successful: 46
 - Failed: 1
 - Last Failure: 2024-11-15 02:00:00
-
-**Detailed Output:** [[Reports/2024-12-16-task-title]]
 ```
+
+Headings inside the file are optional — the parser only looks for `- Command:` and `- Schedule:` lines.
 
 ## File Structure (Target)
 
