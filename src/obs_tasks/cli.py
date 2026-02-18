@@ -141,7 +141,18 @@ def run(task_name: str | None, file_path: str | None) -> None:
         tasks = parse_all_tasks(config.vault_path, config.task_folder)
 
     if not tasks:
-        click.echo("No tasks found.", err=True)
+        if file_path:
+            click.echo(
+                f"Error: No valid task in '{Path(file_path).name}'. "
+                "A task needs at least '- Command:' and '- Schedule:' lines.",
+                err=True,
+            )
+        else:
+            click.echo(
+                "Error: No tasks found in vault. "
+                "Create .md files with '- Command:' and '- Schedule:' in Tasks/.",
+                err=True,
+            )
         sys.exit(1)
 
     # Find the target task
@@ -159,18 +170,8 @@ def run(task_name: str | None, file_path: str | None) -> None:
             sys.exit(1)
         task = matches[0]
     else:
-        # --file mode: if file has one task, run it; if multiple, ask
-        if len(tasks) == 1:
-            task = tasks[0]
-        else:
-            click.echo(f"File contains {len(tasks)} tasks:")
-            for i, t in enumerate(tasks, 1):
-                click.echo(f"  {i}. {t.title}")
-            click.echo()
-            choice = click.prompt(
-                "Which task to run?", type=click.IntRange(1, len(tasks))
-            )
-            task = tasks[choice - 1]
+        # --file mode: one file = one task
+        task = tasks[0]
 
     # Execute
     click.echo(f"▶ Running: {task.title}")

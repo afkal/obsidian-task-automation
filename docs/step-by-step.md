@@ -153,8 +153,8 @@ CLI was prioritised before scheduler since manual triggering is the primary use 
 
 ### Step 8: Integration Tests
 
-- [ ] Update `tests/conftest.py` with shared fixtures: `sample_vault` (tmp_path with realistic task files), `sample_config`
-- [ ] `tests/test_integration.py` — end-to-end tests for the manual execution pipeline:
+- [x] Update `tests/conftest.py` with shared fixtures: `sample_vault` (tmp_path with realistic task files), `sample_config`
+- [x] `tests/test_integration.py` — 14 end-to-end tests for the manual execution pipeline:
   - Full pipeline: parse → execute → write → re-parse → verify state updated
   - Failed task: verify failure status and statistics
   - Multiple tasks execute sequentially without interference
@@ -162,7 +162,7 @@ CLI was prioritised before scheduler since manual triggering is the primary use 
   - Report files are created correctly
   - Statistics accumulate over repeated executions
   - CLI init + list + run work end-to-end
-- [ ] Verify: all tests pass (unit + integration)
+- [x] Verify: 185 tests pass (unit + integration), 97% coverage
 
 ---
 
