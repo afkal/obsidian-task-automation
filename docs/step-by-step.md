@@ -4,9 +4,19 @@
 > Read `docs/mvp-specification.md` first for full context.
 > Human reviewer: use the checkboxes to track progress.
 
+## Current Status
+
+**MVP is complete.** All steps 1–9 are done. 200 tests, 98% coverage.
+
+Additional features implemented beyond the original plan:
+- **Run History** — `#### Run History` markdown table in task files with Obsidian `[[wiki-links]]` to reports (max 20 rows). Implemented in `writer.py`, tested in `test_writer.py`.
+- **Obsidian integration** — Shell Commands + Commander plugin setup documented in README.
+
+**Next steps** are in the Post-MVP section below (scheduler, main loop). These are optional — the MVP is fully functional for manual execution.
+
 ## Project Summary
 
-Python CLI tool that reads task definitions from Obsidian Markdown files, executes them on cron schedules, and writes results back to Markdown. All state lives in the vault — no databases.
+Python CLI tool that reads task definitions from Obsidian Markdown files, executes them manually via CLI or Obsidian Shell Commands plugin, and writes results back to Markdown. All state lives in the vault — no databases.
 
 ## Technology Decisions
 
@@ -43,7 +53,7 @@ Package layout: `src/obs_tasks/`, entry point: `obs-tasks = "obs_tasks.cli:cli"`
 1. **All data in Markdown** — no JSON state files, no databases. Config is the only exception (`config.json` in project root).
 2. **Atomic file writes** — always write to temp file then rename. Never leave a half-written .md file.
 3. **One file per task** — each .md file in Tasks/ is one task. The task title comes from the filename (without .md). Headings inside the file are optional and ignored by the parser.
-4. **Never modify user content** — writer updates only `#### Current State` and `#### Statistics` sections. Task Definition and any user notes are preserved exactly.
+4. **Never modify user content** — writer updates only `#### Current State`, `#### Statistics`, and `#### Run History` sections. Task Definition and any user notes are preserved exactly.
 5. **Recovery over precision** — on startup, compare `last_startup` from state file against each task's `next_run`. Any missed tasks get executed. Tasks that have never run execute immediately.
 6. **Re-parse every tick** — the main loop re-reads all task files each cycle (every 60s). This picks up user edits without needing file watchers.
 7. **Never raise from executor** — `execute_task()` always returns an `ExecutionResult`, even on timeout or crash.
@@ -64,21 +74,21 @@ Work through these steps in order. Each step builds on the previous. Write tests
 
 ### Step 1: Project Scaffolding
 
-- [ ] Create `pyproject.toml` with dependencies: click, pyyaml, python-dateutil, croniter. Dev deps: pytest, pytest-cov.
-- [ ] Create `.gitignore` (standard Python)
-- [ ] Create `src/obs_tasks/__init__.py` with `__version__ = "0.1.0"`
-- [ ] Create `src/obs_tasks/cli.py` with a placeholder Click group
-- [ ] Create `tests/__init__.py` and `tests/conftest.py` (empty)
-- [ ] Verify: `pip install -e ".[dev]"` succeeds, `pytest` runs, `obs-tasks --help` prints output
+- [x] Create `pyproject.toml` with dependencies: click, pyyaml, python-dateutil, croniter. Dev deps: pytest, pytest-cov.
+- [x] Create `.gitignore` (standard Python)
+- [x] Create `src/obs_tasks/__init__.py` with `__version__ = "0.1.0"`
+- [x] Create `src/obs_tasks/cli.py` with a placeholder Click group
+- [x] Create `tests/__init__.py` and `tests/conftest.py` (empty)
+- [x] Verify: `pip install -e ".[dev]"` succeeds, `pytest` runs, `obs-tasks --help` prints output
 
 ---
 
 ### Step 2: Data Models
 
-- [ ] `src/obs_tasks/models.py` — `TaskStatus` enum, `Task` dataclass, `ExecutionResult` dataclass, `SystemState` dataclass, `slugify()` helper
-- [ ] `src/obs_tasks/config.py` — `Config` dataclass with `load()`/`save()` for `~/.obs-tasks/config.json`
-- [ ] `tests/test_models.py` — test defaults, enum values, slugify edge cases, ExecutionResult.summary truncation, Config round-trip
-- [ ] Verify: all tests pass
+- [x] `src/obs_tasks/models.py` — `TaskStatus` enum, `Task` dataclass, `ExecutionResult` dataclass, `SystemState` dataclass, `slugify()` helper
+- [x] `src/obs_tasks/config.py` — `Config` dataclass with `load()`/`save()` for `~/.obs-tasks/config.json`
+- [x] `tests/test_models.py` — test defaults, enum values, slugify edge cases, ExecutionResult.summary truncation, Config round-trip
+- [x] Verify: all tests pass
 
 Refer to `mvp-specification.md` lines 139–162 for the Task data model and lines 588–600 for Config fields.
 
@@ -207,7 +217,7 @@ CLI was prioritised before scheduler since manual triggering is the primary use 
 
 ## Markdown Format Reference
 
-One file per task. Filename = task title (e.g. `Backup Docs.md` → title "Backup Docs"). The writer produces the `Current State` and `Statistics` sections:
+One file per task. Filename = task title (e.g. `Backup Docs.md` → title "Backup Docs"). The writer produces the `Current State`, `Statistics`, and `Run History` sections:
 
 ```markdown
 #### Task Definition
