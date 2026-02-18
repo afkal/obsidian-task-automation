@@ -1,4 +1,7 @@
-"""Tests for obs_tasks.parser — Markdown parser for task definitions."""
+"""Tests for obs_tasks.parser — Markdown parser for task definitions.
+
+Design: one file = one task. The task title comes from the filename (without .md).
+"""
 
 from __future__ import annotations
 
@@ -9,7 +12,7 @@ import pytest
 
 from obs_tasks.models import Task, TaskStatus
 from obs_tasks.parser import (
-    _find_task_blocks,
+    _extract_fields,
     _parse_datetime,
     _parse_duration,
     _parse_int,
@@ -90,19 +93,68 @@ class TestFindTaskFiles:
 
 
 # ---------------------------------------------------------------------------
-# parse_file — simple format (direct heading + fields)
+# parse_file — title from filename
 # ---------------------------------------------------------------------------
 
 
-class TestParseFileSimple:
-    """Tasks with heading followed directly by field lines."""
+class TestParseFileTitleFromFilename:
+    """One file = one task. Title is the filename without .md."""
 
+    def test_title_is_filename_stem(self, vault: Path) -> None:
+        f = _write_task_file(
+            vault,
+            "Backup Docs.md",
+            """\
+- Command: `python backup.py`
+- Schedule: 0 2 * * *
+""",
+        )
+        tasks = parse_file(f)
+        assert len(tasks) == 1
+        assert tasks[0].title == "Backup Docs"
+        assert tasks[0].id == "backup-docs"
+
+    def test_heading_in_file_does_not_affect_title(self, vault: Path) -> None:
+        """Even if the file has a heading, the title comes from the filename."""
+        f = _write_task_file(
+            vault,
+            "My Task.md",
+            """\
+## Some Heading That Differs
+
+- Command: `echo hello`
+- Schedule: 0 * * * *
+""",
+        )
+        tasks = parse_file(f)
+        assert len(tasks) == 1
+        assert tasks[0].title == "My Task"
+
+    def test_slug_id_from_filename(self, vault: Path) -> None:
+        f = _write_task_file(
+            vault,
+            "Backup Vaisala Documentation.md",
+            """\
+- Command: `python ~/scripts/backup_docs.py`
+- Schedule: 0 2 * * *
+""",
+        )
+        tasks = parse_file(f)
+        assert tasks[0].id == "backup-vaisala-documentation"
+
+
+# ---------------------------------------------------------------------------
+# parse_file — basic parsing
+# ---------------------------------------------------------------------------
+
+
+class TestParseFileBasic:
     def test_simple_task(self, vault: Path) -> None:
         f = _write_task_file(
             vault,
-            "simple.md",
+            "Backup Docs.md",
             """\
-### Backup Docs
+#### Task Definition
 - Command: `python backup.py`
 - Schedule: 0 2 * * *
 """,
@@ -113,15 +165,13 @@ class TestParseFileSimple:
         assert t.title == "Backup Docs"
         assert t.command == "python backup.py"
         assert t.schedule == "0 2 * * *"
-        assert t.id == "backup-docs"
         assert t.status == TaskStatus.NEVER_RUN
 
     def test_command_without_backticks(self, vault: Path) -> None:
         f = _write_task_file(
             vault,
-            "nobacktick.md",
+            "My Task.md",
             """\
-### My Task
 - Command: echo hello
 - Schedule: 0 * * * *
 """,
@@ -133,9 +183,8 @@ class TestParseFileSimple:
     def test_minimal_task_only_command_and_schedule(self, vault: Path) -> None:
         f = _write_task_file(
             vault,
-            "minimal.md",
+            "Run Tests.md",
             """\
-## Run Tests
 - Command: `pytest tests/`
 - Schedule: */30 * * * *
 """,
@@ -151,26 +200,31 @@ class TestParseFileSimple:
         assert t.duration is None
         assert t.total_runs == 0
 
-
-# ---------------------------------------------------------------------------
-# parse_file — sub-headed format (#### Task Definition)
-# ---------------------------------------------------------------------------
-
-
-class TestParseFileSubHeaded:
-    """Tasks using the #### Task Definition sub-section variant from the spec."""
-
-    def test_sub_headed_with_all_sections(self, vault: Path) -> None:
+    def test_command_with_backticks_preferred(self, vault: Path) -> None:
         f = _write_task_file(
             vault,
-            "full.md",
+            "task.md",
             """\
-## Backup Vaisala Documentation
+- Command: `echo backtick`
+- Schedule: 0 * * * *
+""",
+        )
+        tasks = parse_file(f)
+        assert tasks[0].command == "echo backtick"
 
-### Purpose
-Daily backup of internal documentation to local storage.
 
-### Task Definition
+# ---------------------------------------------------------------------------
+# parse_file — full spec format with all sections
+# ---------------------------------------------------------------------------
+
+
+class TestParseFileFullFormat:
+    def test_all_fields_parsed(self, vault: Path) -> None:
+        f = _write_task_file(
+            vault,
+            "Backup Vaisala Documentation.md",
+            """\
+#### Task Definition
 - Command: `python ~/scripts/backup_docs.py --target /backups/vaisala`
 - Schedule: 0 2 * * *
 
@@ -206,124 +260,34 @@ Daily backup of internal documentation to local storage.
 
 
 # ---------------------------------------------------------------------------
-# parse_file — multiple tasks in one file
+# parse_file — one file = one task (no multi-task support)
 # ---------------------------------------------------------------------------
 
 
-class TestParseFileMultipleTasks:
-    def test_two_tasks_in_one_file(self, vault: Path) -> None:
+class TestParseFileOneTaskPerFile:
+    """With one-file-per-task, multiple Command/Schedule pairs in the same
+    file are treated as a single task (first Command + first Schedule wins)."""
+
+    def test_only_first_command_used(self, vault: Path) -> None:
         f = _write_task_file(
             vault,
             "multi.md",
             """\
-# Work Automation Tasks
-
-## Backup Docs
-- Command: `python backup.py`
-- Schedule: 0 2 * * *
-
-## Update Stats
-- Command: `python stats.py`
-- Schedule: 0 9 * * MON
-""",
-        )
-        tasks = parse_file(f)
-        assert len(tasks) == 2
-        titles = {t.title for t in tasks}
-        assert titles == {"Backup Docs", "Update Stats"}
-
-    def test_tasks_at_different_heading_levels(self, vault: Path) -> None:
-        f = _write_task_file(
-            vault,
-            "levels.md",
-            """\
-# Top Level
-
-## Task A
-- Command: `echo a`
+## First
+- Command: `echo first`
 - Schedule: 0 1 * * *
 
-### Task B
-- Command: `echo b`
+## Second
+- Command: `echo second`
 - Schedule: 0 2 * * *
 """,
         )
         tasks = parse_file(f)
-        assert len(tasks) == 2
-
-    def test_full_spec_example_two_tasks(self, vault: Path) -> None:
-        """Realistic example from the spec: two tasks in work.md."""
-        f = _write_task_file(
-            vault,
-            "work.md",
-            """\
-# Work Automation Tasks
-
-## Backup Vaisala Documentation
-
-### Purpose
-Daily backup of internal documentation to local storage.
-
-### Task Definition
-- Command: `python ~/scripts/backup_docs.py --target /backups/vaisala`
-- Schedule: 0 2 * * *
-
-#### Current State
-- Status: ✅ Success
-- Last Run: 2024-12-16 02:00:15
-- Next Run: 2024-12-17 02:00:00
-- Duration: 45.2s
-- Result: Backed up 245 pages (12.5 MB)
-
-#### Statistics
-- Total Runs: 47
-- Successful: 46
-- Failed: 1
-- Last Failure: 2024-11-15 02:00:00
-
-**Detailed Output:** [[Reports/2024-12-16-backup-vaisala-documentation]]
-
-### Notes
-- Requires VPN connection
-- Backs up to external drive mounted at /backups
-
----
-
-## Update GitHub Statistics
-
-### Task Definition
-- Command: `python ~/scripts/github_stats.py`
-- Schedule: 0 9 * * MON
-
-#### Current State
-- Status: ✅ Success
-- Last Run: 2024-12-15 09:00:00
-- Next Run: 2024-12-22 09:00:00
-- Duration: 3.2s
-- Result: Analyzed 142 commits, 23 PRs
-
-#### Statistics
-- Total Runs: 8
-- Successful: 8
-- Failed: 0
-- Last Failure: Never
-
-**Detailed Output:** [[Reports/2024-12-15-update-github-statistics]]
-""",
-        )
-        tasks = parse_file(f)
-        assert len(tasks) == 2
-
-        backup = next(t for t in tasks if "Backup" in t.title)
-        assert backup.title == "Backup Vaisala Documentation"
-        assert backup.total_runs == 47
-        assert backup.successful_runs == 46
-
-        stats = next(t for t in tasks if "GitHub" in t.title)
-        assert stats.title == "Update GitHub Statistics"
-        assert stats.schedule == "0 9 * * MON"
-        assert stats.total_runs == 8
-        assert stats.failed_runs == 0
+        # One file = one task
+        assert len(tasks) == 1
+        assert tasks[0].command == "echo first"
+        assert tasks[0].schedule == "0 1 * * *"
+        assert tasks[0].title == "multi"
 
 
 # ---------------------------------------------------------------------------
@@ -356,17 +320,20 @@ class TestParseFileMalformed:
         tasks = parse_file(f)
         assert tasks == []
 
-    def test_command_without_heading_skipped(self, vault: Path) -> None:
+    def test_no_heading_still_works(self, vault: Path) -> None:
+        """With filename-based titles, headings are not required."""
         f = _write_task_file(
             vault,
-            "noheading.md",
+            "headingless.md",
             """\
 - Command: `echo hello`
 - Schedule: 0 * * * *
 """,
         )
         tasks = parse_file(f)
-        assert tasks == []
+        assert len(tasks) == 1
+        assert tasks[0].title == "headingless"
+        assert tasks[0].command == "echo hello"
 
     def test_empty_file(self, vault: Path) -> None:
         f = _write_task_file(vault, "empty.md", "")
@@ -403,7 +370,6 @@ class TestParseFileMetadata:
             vault,
             "tracked.md",
             """\
-### My Task
 - Command: `echo test`
 - Schedule: 0 * * * *
 """,
@@ -411,10 +377,11 @@ class TestParseFileMetadata:
         tasks = parse_file(f)
         assert tasks[0].file_path == f
 
-    def test_heading_line_tracked(self, vault: Path) -> None:
+    def test_heading_line_is_zero(self, vault: Path) -> None:
+        """With one-file-per-task, heading_line is always 0."""
         f = _write_task_file(
             vault,
-            "lines.md",
+            "task.md",
             """\
 # Header
 
@@ -426,8 +393,7 @@ Some intro text.
 """,
         )
         tasks = parse_file(f)
-        # "### My Task" is on line index 4 (0-based)
-        assert tasks[0].heading_line == 4
+        assert tasks[0].heading_line == 0
 
 
 # ---------------------------------------------------------------------------
@@ -439,18 +405,16 @@ class TestParseAllTasks:
     def test_parses_across_files(self, vault: Path) -> None:
         _write_task_file(
             vault,
-            "a.md",
+            "Task A.md",
             """\
-### Task A
 - Command: `echo a`
 - Schedule: 0 1 * * *
 """,
         )
         _write_task_file(
             vault,
-            "b.md",
+            "Task B.md",
             """\
-### Task B
 - Command: `echo b`
 - Schedule: 0 2 * * *
 """,
@@ -466,44 +430,60 @@ class TestParseAllTasks:
 
 
 # ---------------------------------------------------------------------------
-# _find_task_blocks internals
+# _extract_fields
 # ---------------------------------------------------------------------------
 
 
-class TestFindTaskBlocks:
-    def test_block_boundaries_stop_at_same_level_heading(self) -> None:
+class TestExtractFields:
+    def test_extracts_all_fields(self) -> None:
         lines = [
-            "## Task One",
-            "- Command: `echo one`",
-            "- Schedule: 0 1 * * *",
-            "## Task Two",
-            "- Command: `echo two`",
+            "## Heading",
+            "- Command: `echo hello`",
             "- Schedule: 0 2 * * *",
+            "#### Current State",
+            "- Status: ✅ Success",
+            "- Last Run: 2024-12-16 02:00:15",
+            "- Next Run: 2024-12-17 02:00:00",
+            "- Duration: 45.2s",
+            "- Result: All good",
+            "#### Statistics",
+            "- Total Runs: 47",
+            "- Successful: 46",
+            "- Failed: 1",
+            "- Last Failure: 2024-11-15 02:00:00",
         ]
-        blocks = _find_task_blocks(lines)
-        assert len(blocks) == 2
-        assert blocks[0].title == "Task One"
-        assert blocks[1].title == "Task Two"
+        fields = _extract_fields(lines)
+        assert fields["command"] == "echo hello"
+        assert fields["schedule"] == "0 2 * * *"
+        assert fields["status"] == "✅ Success"
+        assert fields["last_run"] == "2024-12-16 02:00:15"
+        assert fields["next_run"] == "2024-12-17 02:00:00"
+        assert fields["duration"] == "45.2s"
+        assert fields["result"] == "All good"
+        assert fields["total_runs"] == "47"
+        assert fields["successful"] == "46"
+        assert fields["failed"] == "1"
+        assert fields["last_failure"] == "2024-11-15 02:00:00"
 
-    def test_block_boundaries_stop_at_higher_level_heading(self) -> None:
+    def test_command_backtick_preferred(self) -> None:
         lines = [
-            "### Deep Task",
-            "- Command: `echo deep`",
-            "- Schedule: 0 1 * * *",
-            "## Higher Level",
-            "Some other content",
+            "- Command: `echo backtick`",
+            "- Schedule: * * * * *",
         ]
-        blocks = _find_task_blocks(lines)
-        assert len(blocks) == 1
-        assert blocks[0].title == "Deep Task"
+        fields = _extract_fields(lines)
+        assert fields["command"] == "echo backtick"
 
-    def test_no_command_lines_returns_empty(self) -> None:
+    def test_command_no_backtick(self) -> None:
         lines = [
-            "## Just a heading",
-            "Some paragraph text.",
+            "- Command: echo plain",
+            "- Schedule: * * * * *",
         ]
-        blocks = _find_task_blocks(lines)
-        assert blocks == []
+        fields = _extract_fields(lines)
+        assert fields["command"] == "echo plain"
+
+    def test_empty_lines(self) -> None:
+        fields = _extract_fields([])
+        assert fields == {}
 
 
 # ---------------------------------------------------------------------------
@@ -635,9 +615,9 @@ class TestParseRealisticExample:
     def test_failed_task_state(self, vault: Path) -> None:
         f = _write_task_file(
             vault,
-            "failed.md",
+            "Database Cleanup.md",
             """\
-### Database Cleanup
+#### Task Definition
 - Command: `python ~/scripts/db_cleanup.py`
 - Schedule: 0 3 * * SUN
 
@@ -658,6 +638,7 @@ class TestParseRealisticExample:
         tasks = parse_file(f)
         assert len(tasks) == 1
         t = tasks[0]
+        assert t.title == "Database Cleanup"
         assert t.status == TaskStatus.FAILED
         assert t.result_summary == "Connection refused: localhost:5432"
         assert t.total_runs == 10
@@ -667,9 +648,9 @@ class TestParseRealisticExample:
     def test_never_run_task(self, vault: Path) -> None:
         f = _write_task_file(
             vault,
-            "new.md",
+            "Brand New Task.md",
             """\
-### Brand New Task
+#### Task Definition
 - Command: `echo hello`
 - Schedule: 0 * * * *
 
@@ -704,9 +685,8 @@ class TestParseRealisticExample:
         """Result field set to '-' should be treated as None."""
         f = _write_task_file(
             vault,
-            "dash.md",
+            "Dash Result.md",
             """\
-### Dash Result
 - Command: `echo test`
 - Schedule: 0 * * * *
 - Result: -

@@ -147,40 +147,12 @@ def _find_section_range(
 
 def _find_task_block_range(
     lines: list[str], task: Task
-) -> tuple[int, int] | None:
-    """Find the line range [start, end) that contains the task's block.
+) -> tuple[int, int]:
+    """Return the line range [start, end) for the task's block.
 
-    Fast path: use ``task.heading_line`` if the heading still matches.
-    Fallback: search by title.
+    With one-file-per-task, the entire file is the task block.
     """
-    # Fast path: heading line index
-    if 0 <= task.heading_line < len(lines):
-        m = _HEADING_RE.match(lines[task.heading_line])
-        if m and m.group(2).strip() == task.title:
-            h_level = len(m.group(1))
-            # Block ends at next heading at same or higher level, or EOF
-            block_end = len(lines)
-            for i in range(task.heading_line + 1, len(lines)):
-                hm = _HEADING_RE.match(lines[i])
-                if hm and len(hm.group(1)) <= h_level:
-                    block_end = i
-                    break
-            return (task.heading_line, block_end)
-
-    # Fallback: search by title
-    for i, line in enumerate(lines):
-        m = _HEADING_RE.match(line)
-        if m and m.group(2).strip() == task.title:
-            h_level = len(m.group(1))
-            block_end = len(lines)
-            for j in range(i + 1, len(lines)):
-                hm = _HEADING_RE.match(lines[j])
-                if hm and len(hm.group(1)) <= h_level:
-                    block_end = j
-                    break
-            return (i, block_end)
-
-    return None
+    return (0, len(lines))
 
 
 def _replace_or_insert_section(
@@ -268,14 +240,7 @@ def update_task_state(
     content = file_path.read_text(encoding="utf-8")
     lines = content.splitlines()
 
-    block_range = _find_task_block_range(lines, task)
-    if block_range is None:
-        logger.error(
-            "Could not find task '%s' in %s", task.title, file_path
-        )
-        return
-
-    block_start, block_end = block_range
+    block_start, block_end = _find_task_block_range(lines, task)
 
     # Compute new state values
     status = TaskStatus.SUCCESS if result.success else TaskStatus.FAILED
@@ -306,10 +271,8 @@ def update_task_state(
         lines, "Current State", state_lines, block_start, block_end
     )
 
-    # Re-find block range (it may have shifted)
-    block_range = _find_task_block_range(lines, task)
-    if block_range is not None:
-        block_start, block_end = block_range
+    # Re-find block range (it may have shifted after insertion)
+    block_start, block_end = _find_task_block_range(lines, task)
 
     lines = _replace_or_insert_section(
         lines, "Statistics", stats_lines, block_start, block_end
@@ -333,7 +296,7 @@ def create_report(
 
     Returns the path to the created report file.
     """
-    date_str = result.started_at.strftime("%Y-%m-%d")
+    date_str = result.started_at.strftime("%Y-%m-%d-%H%M%S")
     slug = slugify(task.title)
     filename = f"{date_str}-{slug}.md"
     report_path = reports_dir / filename

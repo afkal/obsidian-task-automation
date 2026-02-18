@@ -6,10 +6,22 @@ import json
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
-CONFIG_DIR = Path.home() / ".obs-tasks"
-CONFIG_FILE = CONFIG_DIR / "config.json"
-LOG_FILE = CONFIG_DIR / "obs-tasks.log"
-PID_FILE = CONFIG_DIR / "obs-tasks.pid"
+# Config lives in the project root (next to pyproject.toml).
+# _find_project_root() walks up from this file to find it.
+
+def _find_project_root() -> Path:
+    """Find project root by looking for pyproject.toml."""
+    current = Path(__file__).resolve().parent
+    for parent in [current, *current.parents]:
+        if (parent / "pyproject.toml").exists():
+            return parent
+    return current  # fallback
+
+
+PROJECT_ROOT = _find_project_root()
+CONFIG_FILE = PROJECT_ROOT / "config.json"
+LOG_FILE = PROJECT_ROOT / "obs-tasks.log"
+PID_FILE = PROJECT_ROOT / "obs-tasks.pid"
 
 
 @dataclass

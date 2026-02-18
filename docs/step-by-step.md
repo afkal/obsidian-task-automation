@@ -82,23 +82,23 @@ Refer to `mvp-specification.md` lines 139–162 for the Task data model and line
 
 This is the most complex component. Read `mvp-specification.md` lines 108–163 for the task markdown format, and lines 460–516 for realistic examples.
 
-- [ ] `src/obs_tasks/parser.py` — find task files, parse single file, parse all tasks
-- [ ] Support both format variants from the spec (direct `### Title` with fields, and `#### Task Definition` sub-headed)
-- [ ] Parse all fields: Command (from backticks), Schedule, Status (with emoji handling), Last Run, Next Run, Duration, Result, statistics counters
-- [ ] Handle missing/optional fields gracefully — set defaults, never crash
-- [ ] Track source file path and heading line number on each Task (needed by writer)
-- [ ] `tests/test_parser.py` — test simple task, sub-headed format, multiple tasks per file, minimal task (only Command+Schedule), malformed task (skip gracefully), emoji status, datetime parsing, duration parsing, file discovery
-- [ ] Verify: all tests pass
+- [x] `src/obs_tasks/parser.py` — find task files, parse single file, parse all tasks
+- [x] Support both format variants from the spec (direct `### Title` with fields, and `#### Task Definition` sub-headed)
+- [x] Parse all fields: Command (from backticks), Schedule, Status (with emoji handling), Last Run, Next Run, Duration, Result, statistics counters
+- [x] Handle missing/optional fields gracefully — set defaults, never crash
+- [x] Track source file path and heading line number on each Task (needed by writer)
+- [x] `tests/test_parser.py` — test simple task, sub-headed format, multiple tasks per file, minimal task (only Command+Schedule), malformed task (skip gracefully), emoji status, datetime parsing, duration parsing, file discovery
+- [x] Verify: all tests pass
 
 ---
 
 ### Step 4: Command Executor
 
-- [ ] `src/obs_tasks/executor.py` — `execute_task()` that runs a shell command and returns `ExecutionResult`
-- [ ] Use `subprocess.run(shell=True, capture_output=True, text=True, timeout=...)`
-- [ ] Handle: successful commands, non-zero exit codes, timeouts, exceptions — never raise
-- [ ] `tests/test_executor.py` — test echo, stderr capture, exit codes, timeout, invalid commands, duration tracking, working directory
-- [ ] Verify: all tests pass
+- [x] `src/obs_tasks/executor.py` — `execute_task()` that runs a shell command and returns `ExecutionResult`
+- [x] Use `subprocess.run(shell=True, capture_output=True, text=True, timeout=...)`
+- [x] Handle: successful commands, non-zero exit codes, timeouts, exceptions — never raise
+- [x] `tests/test_executor.py` — test echo, stderr capture, exit codes, timeout, invalid commands, duration tracking, working directory
+- [x] Verify: all tests pass
 
 ---
 
@@ -106,13 +106,13 @@ This is the most complex component. Read `mvp-specification.md` lines 108–163 
 
 Second most complex component. The writer must surgically update specific sections without touching anything else.
 
-- [ ] `src/obs_tasks/writer.py` — update task state/statistics in source file, create report files
-- [ ] Find the task's section by heading line (fast path) with fallback to title search
-- [ ] Find and replace `#### Current State` and `#### Statistics` subsections; create them if missing
-- [ ] Create report files at `Reports/YYYY-MM-DD-task-slug.md` with full output, metadata, and Obsidian backlinks
-- [ ] Use atomic writes (temp file + rename) for all file operations
-- [ ] `tests/test_writer.py` — test state updates (success/failure), statistics increments, timestamp/duration formatting, Command/Schedule preservation, section creation when missing, report file creation, atomic write behavior, multi-task file safety
-- [ ] Verify: all tests pass
+- [x] `src/obs_tasks/writer.py` — update task state/statistics in source file, create report files
+- [x] Find the task's section by heading line (fast path) with fallback to title search
+- [x] Find and replace `#### Current State` and `#### Statistics` subsections; create them if missing
+- [x] Create report files at `Reports/YYYY-MM-DD-task-slug.md` with full output, metadata, and Obsidian backlinks
+- [x] Use atomic writes (temp file + rename) for all file operations
+- [x] `tests/test_writer.py` — test state updates (success/failure), statistics increments, timestamp/duration formatting, Command/Schedule preservation, section creation when missing, report file creation, atomic write behavior, multi-task file safety
+- [x] Verify: all tests pass
 
 Refer to `mvp-specification.md` lines 306–341 for the exact section formats the writer should produce.
 
@@ -120,11 +120,10 @@ Refer to `mvp-specification.md` lines 306–341 for the exact section formats th
 
 ### Step 6: State Manager
 
-- [ ] `src/obs_tasks/state.py` — `StateManager` class that reads/writes `.task-runner.md` with YAML frontmatter
-- [ ] `load()` returns defaults if file doesn't exist; `save()` uses atomic write
-- [ ] `record_startup()` and `update_after_execution()` for lifecycle tracking
-- [ ] `tests/test_state.py` — test load/save round-trip, missing file defaults, startup recording, execution counter updates, frontmatter format
-- [ ] Verify: all tests pass
+- [x] `src/obs_tasks/state.py` — minimalist: `save_last_startup()` / `load_last_startup()` with `Task Runner.md` in vault root (YAML frontmatter)
+- [x] `load()` returns None if file doesn't exist; `save()` uses atomic write
+- [x] `tests/test_state.py` — test load/save round-trip, missing file, empty file, invalid YAML, missing field, invalid datetime, multiple cycles
+- [x] Verify: all tests pass
 
 Refer to `mvp-specification.md` lines 354–387 for the state file format.
 

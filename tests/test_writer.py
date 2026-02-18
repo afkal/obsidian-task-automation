@@ -18,6 +18,9 @@ from obs_tasks.writer import (
     update_task_state,
 )
 
+# Note: With one-file-per-task design, _find_task_block_range always
+# returns (0, len(lines)) — the entire file is the task block.
+
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -219,50 +222,32 @@ class TestFindSectionRange:
 
 
 class TestFindTaskBlockRange:
-    def test_fast_path_heading_line(self) -> None:
+    """With one-file-per-task, the block is always the entire file."""
+
+    def test_whole_file_is_block(self) -> None:
         lines = [
-            "# File Header",
-            "",
             "## Backup Docs",
             "- Command: `echo backup`",
+            "- Schedule: 0 2 * * *",
             "",
-            "## Other Task",
+            "#### Current State",
+            "- Status: Never run",
         ]
-        task = _make_task(title="Backup Docs", heading_line=2)
+        task = _make_task(title="Backup Docs", heading_line=0)
         r = _find_task_block_range(lines, task)
-        assert r == (2, 5)
+        assert r == (0, 6)
 
-    def test_fallback_title_search(self) -> None:
-        lines = [
-            "# File Header",
-            "",
-            "## Backup Docs",
-            "- Command: `echo backup`",
-            "",
-            "## Other Task",
-        ]
-        task = _make_task(title="Backup Docs", heading_line=99)  # Wrong line
+    def test_empty_file(self) -> None:
+        lines: list[str] = []
+        task = _make_task(title="Empty", heading_line=0)
         r = _find_task_block_range(lines, task)
-        assert r == (2, 5)
+        assert r == (0, 0)
 
-    def test_block_to_eof(self) -> None:
-        lines = [
-            "## Only Task",
-            "- Command: `echo`",
-            "- Schedule: * * * * *",
-        ]
-        task = _make_task(title="Only Task", heading_line=0)
+    def test_single_line(self) -> None:
+        lines = ["- Command: `echo hi`"]
+        task = _make_task(heading_line=0)
         r = _find_task_block_range(lines, task)
-        assert r == (0, 3)
-
-    def test_not_found(self) -> None:
-        lines = [
-            "## Something Else",
-            "Some text",
-        ]
-        task = _make_task(title="Missing Task", heading_line=0)
-        r = _find_task_block_range(lines, task)
-        assert r is None
+        assert r == (0, 1)
 
 
 # ---------------------------------------------------------------------------
@@ -306,7 +291,7 @@ class TestUpdateTaskStateSuccess:
         f = tmp_path / "task.md"
         f.write_text(
             """\
-## Backup Docs
+#### Task Definition
 - Command: `echo backup`
 - Schedule: 0 2 * * *
 
@@ -343,7 +328,7 @@ class TestUpdateTaskStateSuccess:
         f = tmp_path / "task.md"
         f.write_text(
             """\
-## Backup Docs
+#### Task Definition
 - Command: `echo backup`
 - Schedule: 0 2 * * *
 
@@ -364,7 +349,7 @@ class TestUpdateTaskStateSuccess:
         f = tmp_path / "task.md"
         f.write_text(
             """\
-## Backup Docs
+#### Task Definition
 - Command: `echo backup`
 - Schedule: 0 2 * * *
 """,
@@ -391,7 +376,7 @@ class TestUpdateTaskStateFailure:
         f = tmp_path / "task.md"
         f.write_text(
             """\
-## Backup Docs
+#### Task Definition
 - Command: `echo backup`
 - Schedule: 0 2 * * *
 
@@ -437,7 +422,7 @@ class TestUpdateTaskStateFailure:
         f = tmp_path / "task.md"
         f.write_text(
             """\
-## Backup Docs
+#### Task Definition
 - Command: `echo backup`
 - Schedule: 0 2 * * *
 
@@ -471,16 +456,16 @@ class TestUpdateTaskStateFailure:
 # ---------------------------------------------------------------------------
 
 
-class TestMultiTaskFileSafety:
-    def test_only_target_task_is_modified(self, tmp_path: Path) -> None:
-        f = tmp_path / "multi.md"
+class TestUpdatePreservesUserContent:
+    """With one-file-per-task, updates should not clobber user content."""
+
+    def test_preserves_notes_and_purpose(self, tmp_path: Path) -> None:
+        f = tmp_path / "task.md"
         f.write_text(
             """\
-# Work Tasks
-
-## Task Alpha
-- Command: `echo alpha`
-- Schedule: 0 1 * * *
+#### Task Definition
+- Command: `echo backup`
+- Schedule: 0 2 * * *
 
 #### Current State
 - Status: Never run
@@ -489,35 +474,25 @@ class TestMultiTaskFileSafety:
 - Duration: -
 - Result: -
 
-## Task Beta
-- Command: `echo beta`
-- Schedule: 0 2 * * *
-
-#### Current State
-- Status: ✅ Success
-- Last Run: 2025-01-14 00:00:00
-- Next Run: 2025-01-15 00:00:00
-- Duration: 1.0s
-- Result: Beta OK
+#### Notes
+- Requires VPN connection
+- Runs on the server
 """,
             encoding="utf-8",
         )
-        # Update only Task Alpha
-        task_a = _make_task(
-            title="Task Alpha",
-            command="echo alpha",
-            file_path=f,
-            heading_line=2,
-        )
-        result = _make_result(task_id="task-alpha", stdout="Alpha done")
-        update_task_state(task_a, result)
+        task = _make_task(file_path=f, heading_line=0)
+        result = _make_result()
+        update_task_state(task, result)
 
         content = f.read_text(encoding="utf-8")
-        # Alpha should be updated
-        assert "Alpha done" in content
-        # Beta should be unchanged
-        assert "Beta OK" in content
-        assert "- Command: `echo beta`" in content
+        # User content preserved
+        assert "#### Notes" in content
+        assert "Requires VPN connection" in content
+        # Task definition preserved
+        assert "- Command: `echo backup`" in content
+        assert "- Schedule: 0 2 * * *" in content
+        # State updated
+        assert "✅ Success" in content
 
 
 # ---------------------------------------------------------------------------
@@ -542,7 +517,7 @@ class TestUpdateTaskStateEdgeCases:
         f = tmp_path / "task.md"
         f.write_text(
             """\
-## Backup Docs
+#### Task Definition
 - Command: `echo backup`
 - Schedule: 0 2 * * *
 """,
@@ -575,7 +550,7 @@ class TestCreateReport:
         path = create_report(task, result, reports_dir)
 
         assert path.exists()
-        assert path.name == "2025-01-15-backup-docs.md"
+        assert path.name == "2025-01-15-103000-backup-docs.md"
         assert path.parent == reports_dir
 
     def test_report_contains_metadata(self, tmp_path: Path) -> None:
