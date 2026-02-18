@@ -101,19 +101,31 @@ You can add any other headings or notes (e.g. `#### Notes`) — they won't be to
 | `obs-tasks run --file <path>` | Run the task in a specific file |
 | `obs-tasks --version` | Show version |
 
-## Obsidian Shell Commands Setup
+## Running Tasks from Obsidian
 
-Use the [Shell Commands](https://github.com/Taitava/obsidian-shellcommands) plugin to trigger tasks directly from Obsidian:
+You need two community plugins: **Shell Commands** (to run the CLI) and optionally **Commander** (for a visual ▶ button).
 
-1. Install and enable the Shell Commands plugin
-2. Add a new shell command:
+### 1. Shell Commands plugin
+
+1. Install [Shell Commands](https://github.com/Taitava/obsidian-shellcommands) from Community Plugins
+2. Settings → Shell Commands → **New command**, paste:
    ```
-   /path/to/.venv/bin/obs-tasks run --file "{{file_path:absolute}}"
+   /full/path/to/.venv/bin/obs-tasks run --file {{file_path:absolute}}
    ```
-3. Assign a hotkey or add it to the command palette
-4. Open a task file in Obsidian and trigger the command
+   > **Important:** Do NOT wrap `{{file_path:absolute}}` in quotes — the plugin handles spaces in paths automatically. Quotes cause escaping issues.
+3. Give it an alias like `Run Task`
+4. Assign a hotkey (e.g. `Ctrl+Shift+R` / `Cmd+Shift+R`)
 
-The `{{file_path:absolute}}` variable is replaced by the plugin with the current file's path.
+Now open any task file and press the hotkey to execute it.
+
+### 2. Commander plugin (optional — adds a ▶ button)
+
+1. Install [Commander](https://github.com/phibr0/obsidian-commander) from Community Plugins
+2. Settings → Commander → **Ribbon** → Add command
+3. Search for your Shell Commands alias (`Run Task`)
+4. Pick an icon (e.g. `play`)
+
+You'll now see a ▶ button in the Obsidian ribbon — click it while viewing a task file to run it.
 
 ## Reports
 
