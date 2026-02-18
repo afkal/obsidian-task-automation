@@ -12,6 +12,20 @@ Python CLI tool that reads task definitions from Obsidian Markdown files, execut
 - **Shell Commands plugin support** — trigger tasks from Obsidian's UI with a single click
 - **No external dependencies** — no databases, no cloud services, just Markdown files
 
+## Status: MVP
+
+This project is in **MVP stage** — manual execution works, automatic scheduling does not exist yet.
+
+**What works now:**
+- Define tasks in Markdown, run them manually via CLI or Obsidian Shell Commands plugin
+- Execution results, statistics and run history are written back to the task file
+- Detailed reports with full output are created in `Reports/`
+- The `Schedule` field is parsed but **not acted on** — there is no background scheduler or cron daemon
+
+**Planned (post-MVP):**
+- Background scheduler that runs tasks automatically based on their cron schedule
+- Catch-up logic for missed executions after downtime
+
 ## Installation
 
 Requires Python 3.13+.
