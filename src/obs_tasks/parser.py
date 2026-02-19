@@ -33,6 +33,12 @@ SUCCESSFUL_RE = re.compile(r"^-\s*Successful:\s*(.+?)\s*$")
 FAILED_RE = re.compile(r"^-\s*Failed:\s*(.+?)\s*$")
 LAST_FAILURE_RE = re.compile(r"^-\s*Last Failure:\s*(.+?)\s*$")
 
+# Heading pattern for section detection
+_HEADING_RE = re.compile(r"^(#{1,6})\s+(.+)$")
+
+# Generic parameter line: "- Key: Value"
+_PARAM_LINE_RE = re.compile(r"^-\s+(.+?):\s+(.+?)\s*$")
+
 
 def find_task_files(vault_path: Path, task_folder: str = "Tasks") -> list[Path]:
     """Find all .md files in the task folder, recursively.
@@ -79,6 +85,8 @@ def parse_file(file_path: Path) -> list[Task]:
 
     title = file_path.stem  # filename without .md
 
+    parameters = _parse_parameters_section(lines)
+
     task = Task(
         id=slugify(title),
         title=title,
@@ -97,6 +105,7 @@ def parse_file(file_path: Path) -> list[Task]:
         successful_runs=_parse_int(fields.get("successful")),
         failed_runs=_parse_int(fields.get("failed")),
         last_failure=_parse_datetime(fields.get("last_failure")),
+        parameters=parameters,
         file_path=file_path,
         heading_line=0,
     )
@@ -110,6 +119,62 @@ def parse_all_tasks(vault_path: Path, task_folder: str = "Tasks") -> list[Task]:
     for f in files:
         tasks.extend(parse_file(f))
     return tasks
+
+
+def _normalize_param_key(key: str) -> str:
+    """Normalize a parameter key: lowercase, spaces → underscores.
+
+    >>> _normalize_param_key("Invoice Number")
+    'invoice_number'
+    >>> _normalize_param_key("Amount")
+    'amount'
+    """
+    return re.sub(r"\s+", "_", key.strip().lower())
+
+
+def _parse_parameters_section(lines: list[str]) -> dict[str, str] | None:
+    """Parse the ``#### Parameters`` section from file lines.
+
+    Returns a dict mapping normalised keys to values, or ``None`` if no
+    Parameters section exists.
+    """
+    # Find the #### Parameters heading
+    section_start = None
+    section_level = None
+    for i, line in enumerate(lines):
+        m = _HEADING_RE.match(line)
+        if m:
+            level = len(m.group(1))
+            title = m.group(2).strip()
+            if title.lower() == "parameters" and section_start is None:
+                section_start = i
+                section_level = level
+            elif section_start is not None and level <= section_level:
+                # Hit the next heading at same or higher level → stop
+                break
+
+    if section_start is None:
+        return None
+
+    # Parse "- Key: Value" lines within the section
+    params: dict[str, str] = {}
+    for i in range(section_start + 1, len(lines)):
+        line = lines[i]
+        # Stop at next heading of same or higher level
+        hm = _HEADING_RE.match(line)
+        if hm and len(hm.group(1)) <= section_level:
+            break
+        # Stop at horizontal rule
+        if line.strip() == "---":
+            break
+
+        pm = _PARAM_LINE_RE.match(line)
+        if pm:
+            key = _normalize_param_key(pm.group(1))
+            value = pm.group(2)
+            params[key] = value
+
+    return params if params else None
 
 
 def _extract_fields(lines: list[str]) -> dict[str, str]:

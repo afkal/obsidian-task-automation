@@ -6,7 +6,9 @@ wrapped in an ExecutionResult with success=False.
 
 from __future__ import annotations
 
+import json
 import logging
+import shlex
 import subprocess
 import time
 from datetime import datetime
@@ -17,11 +19,39 @@ from obs_tasks.models import ExecutionResult
 logger = logging.getLogger(__name__)
 
 
+def _prepare_command(
+    command: str, parameters: dict[str, str] | None
+) -> str:
+    """Prepare command string for parameter substitution.
+
+    If *parameters* is given:
+    - If ``{{params}}`` appears in *command*, it is replaced with a
+      shell-quoted JSON string (explicit placement).
+    - Otherwise the JSON string is appended to the end of the command
+      (automatic mode — simpler for the user).
+
+    If *parameters* is ``None``, returns the command unchanged.
+    """
+    if not parameters:
+        return command
+
+    params_json = json.dumps(parameters)
+    quoted = shlex.quote(params_json)
+
+    if "{{params}}" in command:
+        command = command.replace("{{params}}", quoted)
+    else:
+        command = f"{command} {quoted}"
+
+    return command
+
+
 def execute_task(
     task_id: str,
     command: str,
     timeout: float = 300,
     working_dir: Path | None = None,
+    parameters: dict[str, str] | None = None,
 ) -> ExecutionResult:
     """Run a shell command and return the result.
 
@@ -31,6 +61,10 @@ def execute_task(
         timeout: Maximum seconds before the command is killed.
         working_dir: Working directory for the subprocess. Defaults to
             the current directory if *None*.
+        parameters: Optional dict of parameters to pass to the command.
+            If given and ``{{params}}`` appears in the command, it is
+            replaced with a shell-quoted JSON string. Otherwise the
+            JSON is appended to the end of the command.
 
     Returns:
         An :class:`ExecutionResult` — always, even on timeout or crash.
@@ -39,6 +73,7 @@ def execute_task(
     start_time = time.monotonic()
 
     cwd = str(working_dir) if working_dir else None
+    command = _prepare_command(command, parameters)
 
     try:
         logger.info("Executing task '%s': %s", task_id, command)

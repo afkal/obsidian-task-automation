@@ -13,9 +13,11 @@ import pytest
 from obs_tasks.models import Task, TaskStatus
 from obs_tasks.parser import (
     _extract_fields,
+    _normalize_param_key,
     _parse_datetime,
     _parse_duration,
     _parse_int,
+    _parse_parameters_section,
     _parse_status,
     find_task_files,
     parse_all_tasks,
@@ -694,3 +696,149 @@ class TestParseRealisticExample:
         )
         tasks = parse_file(f)
         assert tasks[0].result_summary is None
+
+
+# ---------------------------------------------------------------------------
+# _normalize_param_key
+# ---------------------------------------------------------------------------
+
+
+class TestNormalizeParamKey:
+    def test_simple(self) -> None:
+        assert _normalize_param_key("Amount") == "amount"
+
+    def test_multi_word(self) -> None:
+        assert _normalize_param_key("Invoice Number") == "invoice_number"
+
+    def test_extra_spaces(self) -> None:
+        assert _normalize_param_key("  First  Name  ") == "first_name"
+
+    def test_already_normalized(self) -> None:
+        assert _normalize_param_key("customer") == "customer"
+
+
+# ---------------------------------------------------------------------------
+# _parse_parameters_section
+# ---------------------------------------------------------------------------
+
+
+class TestParseParametersSection:
+    def test_normal_section(self) -> None:
+        lines = [
+            "#### Task Definition",
+            "- Command: `echo test`",
+            "- Schedule: 0 * * * *",
+            "",
+            "#### Parameters",
+            "- Amount: 1234.56",
+            "- Customer: Acme Corp",
+            "- Invoice Number: INV-2026-02",
+        ]
+        params = _parse_parameters_section(lines)
+        assert params == {
+            "amount": "1234.56",
+            "customer": "Acme Corp",
+            "invoice_number": "INV-2026-02",
+        }
+
+    def test_no_parameters_section(self) -> None:
+        lines = [
+            "#### Task Definition",
+            "- Command: `echo test`",
+            "- Schedule: 0 * * * *",
+        ]
+        params = _parse_parameters_section(lines)
+        assert params is None
+
+    def test_empty_parameters_section(self) -> None:
+        """Section heading exists but no parameter lines → None."""
+        lines = [
+            "#### Parameters",
+            "",
+            "#### Current State",
+        ]
+        params = _parse_parameters_section(lines)
+        assert params is None
+
+    def test_key_normalization(self) -> None:
+        lines = [
+            "#### Parameters",
+            "- Full Name: John Doe",
+            "- Tax Rate: 0.25",
+        ]
+        params = _parse_parameters_section(lines)
+        assert params == {"full_name": "John Doe", "tax_rate": "0.25"}
+
+    def test_special_chars_in_values(self) -> None:
+        lines = [
+            "#### Parameters",
+            "- Path: /home/user/docs & files",
+            "- Email: user@example.com",
+        ]
+        params = _parse_parameters_section(lines)
+        assert params == {
+            "path": "/home/user/docs & files",
+            "email": "user@example.com",
+        }
+
+    def test_stops_at_next_heading(self) -> None:
+        lines = [
+            "#### Parameters",
+            "- Key: value",
+            "",
+            "#### Current State",
+            "- Status: ✅ Success",
+        ]
+        params = _parse_parameters_section(lines)
+        assert params == {"key": "value"}
+
+    def test_stops_at_horizontal_rule(self) -> None:
+        lines = [
+            "#### Parameters",
+            "- Key: value",
+            "---",
+            "Some other content",
+        ]
+        params = _parse_parameters_section(lines)
+        assert params == {"key": "value"}
+
+
+# ---------------------------------------------------------------------------
+# parse_file — with parameters
+# ---------------------------------------------------------------------------
+
+
+class TestParseFileWithParameters:
+    def test_task_with_parameters(self, vault: Path) -> None:
+        f = _write_task_file(
+            vault,
+            "Invoice Task.md",
+            """\
+#### Task Definition
+- Command: `python invoice.py {{params}}`
+- Schedule: 0 9 1 * *
+
+#### Parameters
+- Amount: 1234.56
+- Customer: Acme Corp
+""",
+        )
+        tasks = parse_file(f)
+        assert len(tasks) == 1
+        t = tasks[0]
+        assert t.parameters == {"amount": "1234.56", "customer": "Acme Corp"}
+        assert t.command == "python invoice.py {{params}}"
+
+    def test_task_without_parameters(self, vault: Path) -> None:
+        f = _write_task_file(
+            vault,
+            "Simple Task.md",
+            """\
+#### Task Definition
+- Command: `echo hello`
+- Schedule: 0 * * * *
+""",
+        )
+        tasks = parse_file(f)
+        assert len(tasks) == 1
+        assert tasks[0].parameters is None

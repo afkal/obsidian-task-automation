@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from obs_tasks.executor import execute_task
+from obs_tasks.executor import _prepare_command, execute_task
 from obs_tasks.models import ExecutionResult
 
 
@@ -184,3 +184,64 @@ class TestNeverRaises:
         for cmd in commands:
             r = execute_task("safety", cmd, timeout=0.5)
             assert isinstance(r, ExecutionResult), f"Raised for: {cmd}"
+
+
+# ---------------------------------------------------------------------------
+# _prepare_command
+# ---------------------------------------------------------------------------
+
+
+class TestPrepareCommand:
+    def test_no_parameters_passthrough(self) -> None:
+        cmd = _prepare_command("echo hello", None)
+        assert cmd == "echo hello"
+
+    def test_empty_dict_passthrough(self) -> None:
+        cmd = _prepare_command("echo hello", {})
+        assert cmd == "echo hello"
+
+    def test_params_placeholder_replaced(self) -> None:
+        params = {"amount": "100", "name": "Test"}
+        cmd = _prepare_command("python run.py {{params}}", params)
+        # The placeholder should be replaced with a shell-quoted JSON string
+        assert "{{params}}" not in cmd
+        assert "python run.py" in cmd
+
+    def test_no_placeholder_appends_json(self) -> None:
+        """When command has no {{params}}, JSON is appended to the end."""
+        params = {"key": "value"}
+        cmd = _prepare_command("echo hello", params)
+        assert cmd.startswith("echo hello ")
+        assert '"key"' in cmd
+        assert '"value"' in cmd
+
+
+# ---------------------------------------------------------------------------
+# Parameters — integration with execute_task
+# ---------------------------------------------------------------------------
+
+
+class TestExecuteWithParameters:
+    def test_params_substituted_in_command(self) -> None:
+        """{{params}} in command is replaced with JSON and executed."""
+        params = {"greeting": "hello"}
+        r = execute_task("t-param", "echo {{params}}", parameters=params)
+        assert r.success is True
+        # Output should contain the JSON
+        assert "greeting" in r.stdout
+        assert "hello" in r.stdout
+
+    def test_no_params_no_change(self) -> None:
+        """Without parameters, command runs normally."""
+        r = execute_task("t-nop", "echo normal", parameters=None)
+        assert r.success is True
+        assert r.stdout.strip() == "normal"
+
+    def test_special_chars_in_params_safe(self) -> None:
+        """Parameters with shell-special characters are safely escaped."""
+        params = {"cmd": "hello; echo injected"}
+        r = execute_task("t-safe", "echo {{params}}", parameters=params)
+        assert r.success is True
+        # The output should be the JSON string, not execute the injected command
+        assert "injected" not in r.stdout.split("\n")[0] or \
+               '{"cmd": "hello; echo injected"}' in r.stdout

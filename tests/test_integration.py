@@ -433,3 +433,120 @@ class TestCLIEndToEnd:
         tasks = parse_file(task_file)
         assert tasks[0].total_runs == 2
         assert tasks[0].successful_runs == 2
+
+
+# ---------------------------------------------------------------------------
+# Parameters — end-to-end
+# ---------------------------------------------------------------------------
+
+
+class TestParametersEndToEnd:
+    """Verify the full parameters flow: parse → execute → write → report."""
+
+    def test_params_pipeline(self, tmp_path: Path, monkeypatch) -> None:
+        """Task with parameters: JSON passed to command, saved in report."""
+        vault = tmp_path / "vault"
+        tasks_dir = vault / "Tasks"
+        reports_dir = vault / "Reports"
+        tasks_dir.mkdir(parents=True)
+        reports_dir.mkdir(parents=True)
+
+        # Create task with parameters and {{params}} placeholder
+        task_file = tasks_dir / "Invoice Task.md"
+        task_file.write_text(
+            """\
+#### Task Definition
+- Command: `echo {{params}}`
+- Schedule: 0 9 1 * *
+
+#### Parameters
+- Amount: 1234.56
+- Customer: Acme Corp
+""",
+            encoding="utf-8",
+        )
+
+        # 1. Parse — parameters should be read
+        tasks = parse_file(task_file)
+        assert len(tasks) == 1
+        task = tasks[0]
+        assert task.parameters == {"amount": "1234.56", "customer": "Acme Corp"}
+
+        # 2. Execute with parameters
+        result = execute_task(
+            task.id, task.command, timeout=10,
+            parameters=task.parameters,
+        )
+        assert result.success
+        # The JSON should appear in the output
+        assert "amount" in result.stdout
+        assert "1234.56" in result.stdout
+
+        # 3. Write report with parameters
+        report_path = create_report(
+            task, result, reports_dir, parameters=task.parameters,
+        )
+        update_task_state(task, result, report_path=report_path)
+
+        # 4. Verify report contains parameters
+        report_content = report_path.read_text(encoding="utf-8")
+        assert "## Parameters" in report_content
+        assert "| amount | 1234.56 |" in report_content
+        assert "| customer | Acme Corp |" in report_content
+
+        # 5. Re-parse — parameters section should still be intact
+        tasks2 = parse_file(task_file)
+        assert tasks2[0].parameters == {"amount": "1234.56", "customer": "Acme Corp"}
+        assert tasks2[0].total_runs == 1
+        assert tasks2[0].status == TaskStatus.SUCCESS
+
+    def test_params_survive_multiple_runs(self, tmp_path: Path) -> None:
+        """Parameters section preserved across multiple executions."""
+        import time
+
+        vault = tmp_path / "vault"
+        tasks_dir = vault / "Tasks"
+        reports_dir = vault / "Reports"
+        tasks_dir.mkdir(parents=True)
+        reports_dir.mkdir(parents=True)
+
+        task_file = tasks_dir / "Param Task.md"
+        task_file.write_text(
+            """\
+#### Task Definition
+- Command: `echo done`
+- Schedule: 0 * * * *
+
+#### Parameters
+- Key: value123
+""",
+            encoding="utf-8",
+        )
+
+        for i in range(3):
+            tasks = parse_file(task_file)
+            task = tasks[0]
+            result = execute_task(
+                task.id, task.command, timeout=10,
+                parameters=task.parameters,
+            )
+            report = create_report(
+                task, result, reports_dir, parameters=task.parameters,
+            )
+            update_task_state(task, result, report_path=report)
+            if i < 2:
+                time.sleep(1)  # ensure distinct timestamps for reports
+
+        # Parameters should still be there after 3 runs
+        tasks = parse_file(task_file)
+        final = tasks[0]
+        assert final.parameters == {"key": "value123"}
+        assert final.total_runs == 3
+
+        # All 3 reports should have parameters
+        reports = sorted(reports_dir.glob("*.md"))
+        assert len(reports) == 3
+        for r in reports:
+            content = r.read_text(encoding="utf-8")
+            assert "## Parameters" in content
+            assert "| key | value123 |" in content

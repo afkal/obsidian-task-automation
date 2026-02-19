@@ -10,6 +10,7 @@ Python CLI tool that reads task definitions from Obsidian Markdown files, execut
 - **Run History** — each task file includes a table of recent executions with status, duration and links to detailed reports
 - **Obsidian integration** — report links use `[[wiki-links]]` so you can click through from the history table directly to full execution reports
 - **Shell Commands plugin support** — trigger tasks from Obsidian's UI with a single click
+- **Task parameters** — pass dynamic data to commands via `#### Parameters` section, with full audit trail in reports
 - **No external dependencies** — no databases, no cloud services, just Markdown files
 
 ## Status: MVP
@@ -91,6 +92,35 @@ Each `.md` file in `Tasks/` is one task. The filename (without `.md`) is the tas
 
 You can add any other headings or notes (e.g. `#### Notes`) — they won't be touched.
 
+### Parameters
+
+Tasks can include an `#### Parameters` section with key-value pairs. Parameters are automatically appended to the command as a JSON string:
+
+```markdown
+#### Task Definition
+- Command: `python invoice.py`
+- Schedule: 0 9 1 * *
+
+#### Parameters
+- Amount: 1234.56
+- Customer: Acme Corp
+- Invoice Number: INV-2026-02
+```
+
+When run, the command becomes:
+```
+python invoice.py '{"amount": "1234.56", "customer": "Acme Corp", "invoice_number": "INV-2026-02"}'
+```
+
+If you need the JSON in a specific position, use the `{{params}}` placeholder:
+```
+- Command: `python invoice.py {{params}} --verbose`
+```
+
+Parameter keys are normalised (lowercase, spaces → underscores).
+
+Each execution report includes a **Parameters** table, creating an audit trail even when the vault is not version-controlled.
+
 ## CLI Commands
 
 | Command | Description |
@@ -132,6 +162,7 @@ You'll now see a ▶ button in the Obsidian ribbon — click it while viewing a 
 Each execution creates a report in `Reports/` with:
 
 - Timestamp, duration, command, exit code
+- Parameters used (if any) — provides an audit trail of what data was passed
 - Full stdout and stderr output
 - Obsidian backlink to the task file (`[[Task Name]]`)
 

@@ -344,6 +344,79 @@ class TestListVerboseWithHistory:
 # ---------------------------------------------------------------------------
 
 
+# ---------------------------------------------------------------------------
+# run — with parameters
+# ---------------------------------------------------------------------------
+
+
+class TestRunWithParameters:
+    def test_run_with_params_substitution(
+        self, runner: CliRunner, vault: Path, config_file: Path
+    ) -> None:
+        """Task with #### Parameters passes JSON to {{params}}."""
+        param_file = vault / "Tasks" / "Param Task.md"
+        param_file.write_text(
+            """\
+#### Task Definition
+- Command: `echo {{params}}`
+- Schedule: 0 * * * *
+
+#### Parameters
+- Amount: 500
+- Customer: TestCo
+""",
+            encoding="utf-8",
+        )
+        result = runner.invoke(cli, ["run", "-f", str(param_file)])
+        assert result.exit_code == 0
+        assert "Success" in result.output
+        # Output should contain the JSON with parameters
+        assert "amount" in result.output.lower()
+        assert "500" in result.output
+
+    def test_run_with_params_in_report(
+        self, runner: CliRunner, vault: Path, config_file: Path
+    ) -> None:
+        """Parameters are saved in the execution report."""
+        param_file = vault / "Tasks" / "Invoice Task.md"
+        param_file.write_text(
+            """\
+#### Task Definition
+- Command: `echo done`
+- Schedule: 0 * * * *
+
+#### Parameters
+- Amount: 1234
+- Customer: Acme
+""",
+            encoding="utf-8",
+        )
+        runner.invoke(cli, ["run", "-f", str(param_file)])
+
+        reports = list((vault / "Reports").glob("*.md"))
+        assert len(reports) == 1
+        report_content = reports[0].read_text(encoding="utf-8")
+        assert "## Parameters" in report_content
+        assert "| amount | 1234 |" in report_content
+        assert "| customer | Acme |" in report_content
+
+    def test_run_without_params_no_section(
+        self, runner: CliRunner, vault: Path, config_file: Path
+    ) -> None:
+        """Task without parameters → report has no Parameters section."""
+        runner.invoke(cli, ["run", "Echo Task"])
+
+        reports = list((vault / "Reports").glob("*.md"))
+        assert len(reports) == 1
+        report_content = reports[0].read_text(encoding="utf-8")
+        assert "## Parameters" not in report_content
+
+
+# ---------------------------------------------------------------------------
+# config errors
+# ---------------------------------------------------------------------------
+
+
 class TestConfigErrors:
     def test_invalid_config_json(
         self, runner: CliRunner, tmp_path: Path, monkeypatch

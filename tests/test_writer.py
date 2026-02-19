@@ -635,6 +635,41 @@ class TestCreateReport:
 
         assert "(no output)" in content
 
+    def test_report_with_parameters(self, tmp_path: Path) -> None:
+        reports_dir = tmp_path / "Reports"
+        task = _make_task(file_path=tmp_path / "work.md")
+        result = _make_result()
+        params = {"amount": "1234.56", "customer": "Acme Corp"}
+        path = create_report(task, result, reports_dir, parameters=params)
+        content = path.read_text(encoding="utf-8")
+
+        assert "## Parameters" in content
+        assert "| amount | 1234.56 |" in content
+        assert "| customer | Acme Corp |" in content
+        # Parameters section should appear before Output
+        assert content.index("## Parameters") < content.index("## Output")
+
+    def test_report_without_parameters(self, tmp_path: Path) -> None:
+        reports_dir = tmp_path / "Reports"
+        task = _make_task(file_path=tmp_path / "work.md")
+        result = _make_result()
+        path = create_report(task, result, reports_dir, parameters=None)
+        content = path.read_text(encoding="utf-8")
+
+        assert "## Parameters" not in content
+
+    def test_report_parameters_table_format(self, tmp_path: Path) -> None:
+        reports_dir = tmp_path / "Reports"
+        task = _make_task(file_path=tmp_path / "work.md")
+        result = _make_result()
+        params = {"invoice_number": "INV-2026-02"}
+        path = create_report(task, result, reports_dir, parameters=params)
+        content = path.read_text(encoding="utf-8")
+
+        assert "| Parameter | Value |" in content
+        assert "|-----------|-------|" in content
+        assert "| invoice_number | INV-2026-02 |" in content
+
 
 # ---------------------------------------------------------------------------
 # _parse_history_rows

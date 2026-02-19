@@ -57,6 +57,9 @@ class Task:
     failed_runs: int = 0
     last_failure: datetime | None = None
 
+    # Parameters (user-editable, from #### Parameters section)
+    parameters: dict[str, str] | None = None
+
     # Source location (for writer)
     file_path: Path | None = None
     heading_line: int = 0

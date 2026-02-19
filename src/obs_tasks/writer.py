@@ -384,6 +384,7 @@ def create_report(
     task: Task,
     result: ExecutionResult,
     reports_dir: Path,
+    parameters: dict[str, str] | None = None,
 ) -> Path:
     """Create a detailed report file for an execution.
 
@@ -412,6 +413,21 @@ def create_report(
         f"**Command:** `{task.command}`",
         f"**Exit Code:** {result.exit_code}",
         f"**Status:** {status_text}",
+    ]
+
+    # Add parameters section if present
+    if parameters:
+        report_lines += [
+            "",
+            "## Parameters",
+            "",
+            "| Parameter | Value |",
+            "|-----------|-------|",
+        ]
+        for key, value in parameters.items():
+            report_lines.append(f"| {key} | {value} |")
+
+    report_lines += [
         "",
         "## Output",
         "",

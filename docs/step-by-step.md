@@ -6,10 +6,11 @@
 
 ## Current Status
 
-**MVP is complete.** All steps 1–9 are done. 200 tests, 98% coverage.
+**MVP is complete.** All steps 1–9 are done. 232 tests, 98% coverage.
 
 Additional features implemented beyond the original plan:
 - **Run History** — `#### Run History` markdown table in task files with Obsidian `[[wiki-links]]` to reports (max 20 rows). Implemented in `writer.py`, tested in `test_writer.py`.
+- **Parameters** — `#### Parameters` section in task files with `- Key: Value` pairs, passed as JSON via `{{params}}` placeholder. Parameters saved in reports for audit trail. Implemented in `parser.py`, `executor.py`, `writer.py`, `cli.py`.
 - **Obsidian integration** — Shell Commands + Commander plugin setup documented in README.
 
 **Next steps** are in the Post-MVP section below (scheduler, main loop). These are optional — the MVP is fully functional for manual execution.
@@ -224,6 +225,10 @@ One file per task. Filename = task title (e.g. `Backup Docs.md` → title "Backu
 - Command: `shell command to execute`
 - Schedule: 0 2 * * *
 
+#### Parameters
+- Amount: 1234.56
+- Customer: Acme Corp
+
 #### Current State
 - Status: ✅ Success
 - Last Run: 2024-12-16 02:00:15
@@ -245,7 +250,7 @@ One file per task. Filename = task title (e.g. `Backup Docs.md` → title "Backu
 | 2024-12-14 02:00:09 | ❌ | 1.2s | [[2024-12-14-020009-backup-docs]] |
 ```
 
-Headings inside the file are optional — the parser only looks for `- Command:` and `- Schedule:` lines. The Run History table is limited to the 20 most recent rows.
+Headings inside the file are optional — the parser only looks for `- Command:` and `- Schedule:` lines. The `#### Parameters` section is optional — if present, keys are normalised (lowercase, spaces → underscores) and the JSON is automatically appended to the command. Use `{{params}}` placeholder to control the position explicitly. Parameters are also saved in execution reports. The Run History table is limited to the 20 most recent rows.
 
 ## File Structure (Target)
 

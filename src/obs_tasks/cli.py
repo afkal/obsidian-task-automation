@@ -179,11 +179,14 @@ def run(task_name: str | None, file_path: str | None) -> None:
     click.echo()
 
     result = execute_task(
-        task.id, task.command, timeout=config.command_timeout
+        task.id, task.command, timeout=config.command_timeout,
+        parameters=task.parameters,
     )
 
     # Write results back (create report first so we can link it in history)
-    report_path = create_report(task, result, config.reports_path)
+    report_path = create_report(
+        task, result, config.reports_path, parameters=task.parameters,
+    )
     update_task_state(task, result, report_path=report_path)
 
     # Show result

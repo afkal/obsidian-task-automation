@@ -78,8 +78,21 @@ class TestTask:
         assert task.successful_runs == 0
         assert task.failed_runs == 0
         assert task.last_failure is None
+        assert task.parameters is None
         assert task.file_path is None
         assert task.heading_line == 0
+
+    def test_parameters_default_none(self):
+        task = Task(id="t", title="T", command="cmd", schedule="* * * * *")
+        assert task.parameters is None
+
+    def test_parameters_with_dict(self):
+        params = {"amount": "1234.56", "customer": "Acme Corp"}
+        task = Task(
+            id="t", title="T", command="cmd", schedule="* * * * *",
+            parameters=params,
+        )
+        assert task.parameters == {"amount": "1234.56", "customer": "Acme Corp"}
 
 
 # --- ExecutionResult ---
